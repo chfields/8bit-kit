@@ -1,0 +1,61 @@
+import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import { Scene } from "@babylonjs/core/scene";
+import { PortalStart } from "../xr/Portal";
+export declare const SCREEN_HOLD_MS = 900;
+export declare const CABINET_SCREEN_COLUMNS: number;
+export type CabinetArt = {
+    sideRows: string[];
+    screenRows: string[];
+    colors: Record<string, Color3>;
+    floating: {
+        grid: string[];
+        colors: Record<string, Color3>;
+    };
+};
+export declare const CABINET_DEPTH: number;
+export type CoinCabinetOptions = {
+    head: Vector3;
+    floorY: number;
+    wallX: number;
+    wallZ: number;
+    onScreenOpens: (start: PortalStart) => void;
+};
+export declare class CoinCabinet {
+    static configure(cabinetArt: CabinetArt): void;
+    static create(scene: Scene, options: CoinCabinetOptions): CoinCabinet;
+    private scene;
+    private options;
+    node: TransformNode;
+    private templates;
+    private blockName;
+    private cubes;
+    private marquee;
+    private insertCoin;
+    private coin;
+    private floater;
+    private floaterTemplates;
+    private observer;
+    static createShowcase(scene: Scene, parent: TransformNode, localPosition: Vector3): CoinCabinet;
+    private constructor();
+    private templateFor;
+    private buildCubes;
+    private addJoysticks;
+    private addCube;
+    private localToWorld;
+    private startBuild;
+    private createMarquee;
+    private showSigns;
+    private startInsertCoin;
+    private disposeCoin;
+    private screenOnWall;
+    private openScreen;
+    private hideBlocksInFrontOf;
+    private showFloater;
+    private swayFloater;
+    private burst;
+    private disposeBlocks;
+    private stopAnimation;
+    dispose(): void;
+}

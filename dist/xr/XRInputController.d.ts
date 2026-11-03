@@ -1,0 +1,30 @@
+import { Ray } from "@babylonjs/core/Culling/ray";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import { WebXRAbstractMotionController } from "@babylonjs/core/XR/motionController/webXRAbstractMotionController";
+import { WebXRControllerComponent } from "@babylonjs/core/XR/motionController/webXRControllerComponent";
+import { WebXRInputSource } from "@babylonjs/core/XR/webXRInputSource";
+export declare class XRInputController {
+    private motionController;
+    private inputSource;
+    private handness;
+    private trigger;
+    private buttons;
+    private triggerObservers;
+    private buttonObservers;
+    private controllerMesh;
+    constructor(motionController: WebXRAbstractMotionController, inputSource: WebXRInputSource, handness: string);
+    showModel(): void;
+    hideModel(): void;
+    isForInputSource(inputSource: WebXRInputSource): boolean;
+    private triggerStateChanged;
+    private buttonStateChanged;
+    private setupTrigger;
+    isPrimaryButtonPressed(): boolean;
+    getPosition(): Vector3;
+    getAimRay(): Ray;
+    getMesh(): AbstractMesh | undefined;
+    addTriggerObserver(observer: (trigger: WebXRControllerComponent, inputSource: WebXRInputSource) => void): void;
+    addButtonObserver(observer: (button: WebXRControllerComponent, inputSource: WebXRInputSource) => void): void;
+    dispose(): void;
+}

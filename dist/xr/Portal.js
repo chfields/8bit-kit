@@ -4,8 +4,7 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { BoxParticleEmitter } from "@babylonjs/core/Particles/EmitterTypes/boxParticleEmitter";
-import { ParticleHelper } from "@babylonjs/core/Particles/particleHelper";
-import { log } from "../game/Logger";
+import { createPortalSmoke } from "./PortalSmoke";
 const EDGE_THICKNESS = 0.05;
 export const PORTAL_REVEAL_MS = 1200;
 // In front of the wall so the panels also hide anything placed right on it.
@@ -65,12 +64,6 @@ export class Portal {
             configurable: true,
             writable: true,
             value: null
-        });
-        Object.defineProperty(this, "disposed", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: false
         });
         Object.defineProperty(this, "revealObserver", {
             enumerable: true,
@@ -236,30 +229,19 @@ export class Portal {
         });
     }
     createParticleSystem(box, length) {
-        ParticleHelper.ParseFromSnippetAsync("UY098C#488", this.scene, false)
-            .then((system) => {
-            if (this.disposed) {
-                system.dispose();
-                return;
-            }
-            system.emitter = box;
-            // Emit along the edge itself, in the box's local X direction. The emitter
-            // follows the box's scale, so the smoke grows with the portal.
-            const emitter = new BoxParticleEmitter();
-            emitter.minEmitBox = new Vector3(-length / 2, 0, 0);
-            emitter.maxEmitBox = new Vector3(length / 2, 0, 0);
-            emitter.direction1 = new Vector3(-1, -1, -1);
-            emitter.direction2 = new Vector3(1, 1, 1);
-            system.particleEmitterType = emitter;
-            this.particleSystems.push(system);
-        })
-            .catch((error) => {
-            // The effect is loaded from Babylon's snippet server and is only decoration.
-            log.warn("Portal particles not loaded", error);
-        });
+        const system = createPortalSmoke(this.scene);
+        system.emitter = box;
+        // Emit along the edge itself, in the box's local X direction. The emitter
+        // follows the box's scale, so the smoke grows with the portal.
+        const emitter = new BoxParticleEmitter();
+        emitter.minEmitBox = new Vector3(-length / 2, 0, 0);
+        emitter.maxEmitBox = new Vector3(length / 2, 0, 0);
+        emitter.direction1 = new Vector3(-1, -1, -1);
+        emitter.direction2 = new Vector3(1, 1, 1);
+        system.particleEmitterType = emitter;
+        this.particleSystems.push(system);
     }
     dispose() {
-        this.disposed = true;
         this.stopReveal();
         this.particleSystems.forEach((system) => system.dispose());
         this.particleSystems = [];

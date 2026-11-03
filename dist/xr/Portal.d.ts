@@ -17,7 +17,6 @@ export declare class Portal {
     private maskPanels;
     private particleSystems;
     private glowLayer;
-    private disposed;
     private revealObserver;
     constructor(linePoints: Vector3[], scene: Scene, wallToWorld: Matrix, start: PortalStart);
     private createPortal;

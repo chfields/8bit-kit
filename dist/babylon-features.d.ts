@@ -1,0 +1,10 @@
+import "@babylonjs/core/Animations/animatable.js";
+import "@babylonjs/core/Collisions/collisionCoordinator";
+import "@babylonjs/core/Culling/ray";
+import "@babylonjs/core/Helpers/sceneHelpers";
+import "@babylonjs/core/Layers/effectLayerSceneComponent";
+import "@babylonjs/core/Particles/particleSystemComponent";
+import "@babylonjs/core/XR/index";
+import "@babylonjs/core/Materials/Node/Blocks";
+import "@babylonjs/loaders/glTF/glTFFileLoader";
+import "@babylonjs/loaders/glTF/2.0/index";
