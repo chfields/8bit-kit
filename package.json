@@ -5,7 +5,9 @@
   "license": "MIT",
   "type": "module",
   "repository": "github:chfields/8bit-kit",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "sideEffects": false,
   "exports": {
     "./*": {
