@@ -36,28 +36,43 @@ And set this in the game's `tsconfig.json`, or the type check sees two copies:
 }
 ```
 
-Set the default log level once, at the top of the game's `main.ts`. Without this call the
-level is `warn`. Adding `?log=debug` to the URL overrides it.
+## Starting a game
+
+Import these first in the game's `main.ts`, then configure the kit once, before anything
+creates its objects. Crawler does this in a file called `src/kitSetup.ts`.
 
 ```ts
+import "8bit-kit/babylon-features";
 import { configureLog } from "8bit-kit/game/Logger";
 configureLog({ defaultLevel: import.meta.env.DEV ? "debug" : "warn" });
 ```
+
+Without `configureLog`, the log level is `warn`. Adding `?log=debug` to the URL overrides it.
+
+`GameAssetManager`, `PlayerBullet` and `CoinCabinet` throw an error if they're created before
+their `configure` call:
+
+```ts
+GameAssetManager.configure({ sounds, meshes });
+PlayerBullet.configure({ collisionMask, destroys, onCollision });
+CoinCabinet.configure({ sideRows, screenRows, colors, floating });
+```
+
+`Hud` takes `{ longestText }` when it's created.
 
 ## What a game must provide
 
 This kit is for my own games. It's public so that their builds can install it without a
 token, and it isn't supported for other projects.
 
-- **Babylon features.** Babylon only switches on some features when their module is
-  imported. Keep these in the game's `main.ts`, because the kit doesn't import them:
-  - `@babylonjs/core/Layers/effectLayerSceneComponent` and
-    `@babylonjs/core/Particles/particleSystemComponent` for `xr/Portal`
-  - `@babylonjs/core/Culling/ray` for `screen/VoxelButton` and `screen/ErrorScreenXR`
-- **The font.** Load "Press Start 2P" before using `assets/Fonts` or `game/UITextMesh`.
-- **Masks.** The kit owns the `CollisionGroup` numbers. Each game defines its own masks, and
+- **Babylon:** `@babylonjs/core`, `@babylonjs/gui` and `@babylonjs/loaders`.
+- **The font:** load "Press Start 2P" before using `assets/Fonts` or `game/UITextMesh`.
+- **Masks:** the kit owns the `CollisionGroup` numbers. Each game defines its own masks, and
   16 is free for an extra group.
-- **Network.** `xr/Portal` downloads its smoke from Babylon's snippet server when it opens.
+- **A model** named `Pistol`, for `xr/XRInputController`.
+- **Images:** `/assets/images/NightSkybox.png` for `xr/XREnvironment`, and
+  `/assets/images/stars.jpg` for `xr/Rift`.
+- **Sounds:** `alien-explosion`, `cabinet-build`, `coin-drop`, `laser`, `mothership-explosion`, `ound`, `play`, `portal-rush`, `screen-hum`, `screen-open`.
 
 The kit assumes the wall faces +Z. `game/HighScore` stores under `"highScore"`, which is
 separate for each site.
@@ -65,6 +80,8 @@ separate for each site.
 ## Working on it
 
 - `npm run build` type checks and compiles `src` to `dist`.
+- `npm test` runs the logic tests. Most of the kit is tested through a game's own suite.
+- `python3 scripts/generate-smoke.py` redraws the portal's smoke. Needs Pillow and NumPy.
 - `npm link` here, then `npm link 8bit-kit` in a game, to use a local copy.
 - `scripts/release.sh 0.2.0` builds, commits `dist` and tags. It doesn't push.
 
