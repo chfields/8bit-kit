@@ -74,6 +74,12 @@ token, and it isn't supported for other projects.
   `/assets/images/stars.jpg` for `xr/Rift`.
 - **Sounds:** `alien-explosion`, `cabinet-build`, `coin-drop`, `laser`, `mothership-explosion`, `portal-rush`, `screen-hum`, `screen-open`.
 
+The portal's edges draw in rendering group 1, so the game must not clear depth between groups:
+
+```ts
+scene.setRenderingAutoClearDepthStencil(1, false, false, false);
+```
+
 The kit assumes the wall faces +Z. `game/HighScore` stores under `"highScore"`, which is
 separate for each site.
 
