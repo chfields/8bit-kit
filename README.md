@@ -72,7 +72,7 @@ token, and it isn't supported for other projects.
 - **A model** named `Pistol`, for `xr/XRInputController`.
 - **Images:** `/assets/images/NightSkybox.png` for `xr/XREnvironment`, and
   `/assets/images/stars.jpg` for `xr/Rift`.
-- **Sounds:** `alien-explosion`, `cabinet-build`, `coin-drop`, `laser`, `mothership-explosion`, `ound`, `play`, `portal-rush`, `screen-hum`, `screen-open`.
+- **Sounds:** `alien-explosion`, `cabinet-build`, `coin-drop`, `laser`, `mothership-explosion`, `portal-rush`, `screen-hum`, `screen-open`.
 
 The kit assumes the wall faces +Z. `game/HighScore` stores under `"highScore"`, which is
 separate for each site.
