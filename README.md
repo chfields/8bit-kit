@@ -27,6 +27,15 @@ linked kit can't load a second copy from its own folder:
 resolve: { dedupe: ["@babylonjs/core", "@babylonjs/gui"] }
 ```
 
+And set this in the game's `tsconfig.json`, or the type check sees two copies:
+
+```json
+"paths": {
+  "@babylonjs/core/*": ["./node_modules/@babylonjs/core/*"],
+  "@babylonjs/gui/*": ["./node_modules/@babylonjs/gui/*"]
+}
+```
+
 Set the default log level once, at the top of the game's `main.ts`. Without this call the
 level is `warn`. Adding `?log=debug` to the URL overrides it.
 
