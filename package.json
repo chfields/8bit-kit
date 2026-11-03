@@ -8,7 +8,9 @@
   "files": [
     "dist"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/babylon-features.js"
+  ],
   "exports": {
     "./*": {
       "types": "./dist/*.d.ts",
@@ -21,7 +23,8 @@
   },
   "peerDependencies": {
     "@babylonjs/core": "^8.3.1",
-    "@babylonjs/gui": "^8.3.1"
+    "@babylonjs/gui": "^8.3.1",
+    "@babylonjs/loaders": "^8.3.1"
   },
   "dependencies": {
     "earcut": "^3.0.1",
@@ -30,6 +33,7 @@
   "devDependencies": {
     "@babylonjs/core": "8.3.1",
     "@babylonjs/gui": "8.3.1",
+    "@babylonjs/loaders": "8.3.1",
     "@types/earcut": "^3.0.0",
     "@types/fontfaceobserver": "^2.1.3",
     "typescript": "~5.8.3",

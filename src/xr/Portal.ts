@@ -7,10 +7,9 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Observer } from "@babylonjs/core/Misc/observable";
 import { BoxParticleEmitter } from "@babylonjs/core/Particles/EmitterTypes/boxParticleEmitter";
-import { ParticleHelper } from "@babylonjs/core/Particles/particleHelper";
+import { createPortalSmoke } from "./PortalSmoke";
 import { Scene } from "@babylonjs/core/scene";
 import { Nullable } from "@babylonjs/core/types";
-import { log } from "../game/Logger";
 
 const EDGE_THICKNESS = 0.05;
 export const PORTAL_REVEAL_MS = 1200;
@@ -44,7 +43,6 @@ export class Portal {
   private maskPanels: Mesh[] = [];
   private particleSystems: any[] = [];
   private glowLayer: GlowLayer | null = null;
-  private disposed: boolean = false;
   private revealObserver: Nullable<Observer<Scene>> = null;
 
   constructor(
@@ -282,31 +280,20 @@ export class Portal {
   }
 
   private createParticleSystem(box: AbstractMesh, length: number) {
-    ParticleHelper.ParseFromSnippetAsync("UY098C#488", this.scene, false)
-      .then((system) => {
-        if (this.disposed) {
-          system.dispose();
-          return;
-        }
-        system.emitter = box;
-        // Emit along the edge itself, in the box's local X direction. The emitter
-        // follows the box's scale, so the smoke grows with the portal.
-        const emitter = new BoxParticleEmitter();
-        emitter.minEmitBox = new Vector3(-length / 2, 0, 0);
-        emitter.maxEmitBox = new Vector3(length / 2, 0, 0);
-        emitter.direction1 = new Vector3(-1, -1, -1);
-        emitter.direction2 = new Vector3(1, 1, 1);
-        system.particleEmitterType = emitter;
-        this.particleSystems.push(system);
-      })
-      .catch((error) => {
-        // The effect is loaded from Babylon's snippet server and is only decoration.
-        log.warn("Portal particles not loaded", error);
-      });
+    const system = createPortalSmoke(this.scene);
+    system.emitter = box;
+    // Emit along the edge itself, in the box's local X direction. The emitter
+    // follows the box's scale, so the smoke grows with the portal.
+    const emitter = new BoxParticleEmitter();
+    emitter.minEmitBox = new Vector3(-length / 2, 0, 0);
+    emitter.maxEmitBox = new Vector3(length / 2, 0, 0);
+    emitter.direction1 = new Vector3(-1, -1, -1);
+    emitter.direction2 = new Vector3(1, 1, 1);
+    system.particleEmitterType = emitter;
+    this.particleSystems.push(system);
   }
 
   public dispose() {
-    this.disposed = true;
     this.stopReveal();
     this.particleSystems.forEach((system) => system.dispose());
     this.particleSystems = [];
