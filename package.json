@@ -1,0 +1,32 @@
+{
+  "name": "8bit-kit",
+  "version": "0.1.0",
+  "description": "Shared code for 8-bit WebXR arcade games built with BabylonJS",
+  "license": "MIT",
+  "type": "module",
+  "repository": "github:chfields/8bit-kit",
+  "files": ["dist"],
+  "sideEffects": false,
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc"
+  },
+  "peerDependencies": {
+    "@babylonjs/core": "^8.3.1",
+    "@babylonjs/gui": "^8.3.1"
+  },
+  "dependencies": {
+    "fontfaceobserver": "^2.3.0"
+  },
+  "devDependencies": {
+    "@babylonjs/core": "^8.3.1",
+    "@babylonjs/gui": "^8.3.1",
+    "@types/fontfaceobserver": "^2.1.3",
+    "typescript": "~5.8.3"
+  }
+}
