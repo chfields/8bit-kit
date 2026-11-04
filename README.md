@@ -60,6 +60,19 @@ CoinCabinet.configure({ sideRows, screenRows, colors, floating });
 
 `Hud` takes `{ longestText }` when it's created.
 
+## Test Room
+
+An optional step where the player chooses the wall by facing it. Add
+`TEST_ROOM_BUTTON_TYPES` to `PlayerBullet.configure`'s `destroys`, add a button to the
+start screen, and have it call:
+
+    await xrEnvironment.enterVR({ chooseWall: true });
+    const testRoom = new TestRoom({ xrEnvironment, scene, getAimRay, onStart, onBack });
+
+`onStart` runs just before the wall locks, so it must leave the game ready for the size
+observers to start its opening. Call `testRoom.dispose()` when the session ends. It's safe
+to call more than once. The pistol must be able to fire before a stage exists.
+
 ## What a game must provide
 
 This kit is for my own games. It's public so that their builds can install it without a

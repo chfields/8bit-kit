@@ -1,0 +1,287 @@
+import { Ray } from "@babylonjs/core/Culling/ray";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { LinesMesh } from "@babylonjs/core/Meshes/linesMesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { Observer } from "@babylonjs/core/Misc/observable";
+import { Scene } from "@babylonjs/core/scene";
+import { Nullable } from "@babylonjs/core/types";
+import { GameAssetManager } from "../assets/GameAssetManager";
+import { VoxelText, voxelTextWidth } from "../effects/VoxelText";
+import { VoxelButton } from "../screen/VoxelButton";
+import { RoomLimits, roomWarnings } from "./RoomCheck";
+import { XREnvironment } from "./XREnvironment";
+
+// A game adds these to PlayerBullet.configure's destroys, so shots reach the buttons.
+export const TEST_ROOM_BUTTON_TYPES = ["testRoomStart", "testRoomBack"];
+
+// Often enough to feel live, and rarely enough that the glow doesn't flicker.
+const CHECK_INTERVAL_MS = 250;
+const TITLE = "THIS WALL WILL BE THE PORTAL";
+const NO_WALL_TITLE = "FACE A WALL";
+const TEXT_CUBE_SIZE = 0.012;
+const WARNING_CUBE_SIZE = 0.009;
+const BUTTON_CUBE_SIZE = 0.02;
+// Text never takes more of the wall than this.
+const MAX_TEXT_WIDTH_OF_WALL = 0.9;
+const IN_FRONT_OF_WALL = 0.3;
+const TITLE_ABOVE_HEAD = 0.45;
+const WARNING_GAP = 0.15;
+const BUTTONS_BELOW_HEAD = 0.25;
+const BUTTON_SPACING = 0.5;
+// With no wall to stand against, how far ahead of the player the text and button go.
+const NO_WALL_DISTANCE = 2;
+const GLOW_ALPHA = 0.25;
+const GLOW_COLOR = new Color3(0.2, 1, 0.9);
+const TEXT_COLOR = new Color3(0.2, 1, 0.9);
+const WARNING_COLOR = new Color3(1, 0.8, 0.1);
+const START_COLOR = new Color3(0.2, 0.95, 0.3);
+const BACK_COLOR = new Color3(0.95, 0.2, 0.2);
+const OUTLINE_COLOR = new Color3(0.6, 0.6, 0.8);
+
+export type TestRoomOptions = {
+  xrEnvironment: XREnvironment;
+  scene: Scene;
+  getAimRay: () => Nullable<Ray>;
+  limits?: RoomLimits;
+  // Runs just before the wall locks, which fires the size observers. The game should
+  // set itself up so that they start its opening.
+  onStart: () => void;
+  // The player chose to leave. The game should exit XR.
+  onBack: () => void;
+};
+
+// Shows which wall the game would use, turning with the player, until they start or leave.
+export class TestRoom {
+  private options: TestRoomOptions;
+  private scene: Scene;
+  private observer: Nullable<Observer<Scene>> = null;
+  private lastCheck = 0;
+  private disposed = false;
+  private finishing = false;
+  private wall: any = null;
+  private glow: Nullable<Mesh> = null;
+  private glowMaterial: StandardMaterial;
+  private outlines = new Map<any, LinesMesh>();
+  private texts: VoxelText[] = [];
+  private warningTexts: VoxelText[] = [];
+  private warningsShown = "";
+  private buttons: VoxelButton[] = [];
+  private noWallShown = false;
+
+  constructor(options: TestRoomOptions) {
+    this.options = options;
+    this.scene = options.scene;
+    this.glowMaterial = new StandardMaterial("testRoomGlow", this.scene);
+    this.glowMaterial.disableLighting = true;
+    this.glowMaterial.emissiveColor = GLOW_COLOR;
+    this.glowMaterial.alpha = GLOW_ALPHA;
+    this.glowMaterial.backFaceCulling = false;
+    this.observer = this.scene.onBeforeRenderObservable.add(() => this.tick());
+  }
+
+  private tick() {
+    const now = performance.now();
+    if (this.finishing || now - this.lastCheck < CHECK_INTERVAL_MS) return;
+    this.lastCheck = now;
+    this.outlineNewFurniture();
+    const faced = this.options.xrEnvironment.getFacedWall();
+    if (faced && faced !== this.wall) {
+      this.showWall(faced);
+    } else if (this.wall) {
+      this.updateWarnings();
+    } else if (!this.noWallShown) {
+      this.showNoWall();
+    }
+  }
+
+  private outlineNewFurniture() {
+    this.options.xrEnvironment.getFurniturePlanes().forEach((plane) => {
+      if (this.outlines.has(plane)) return;
+      const outline = MeshBuilder.CreateLines(
+        "testRoomOutline",
+        {
+          points: plane.polygonDefinition.map(
+            (p: any) => new Vector3(p.x, 0, p.z)
+          ),
+        },
+        this.scene
+      );
+      outline.color = OUTLINE_COLOR;
+      outline.isPickable = false;
+      outline.parent = plane.mesh;
+      this.outlines.set(plane, outline);
+    });
+  }
+
+  private wallBox() {
+    this.wall.mesh.computeWorldMatrix(true);
+    return this.wall.mesh.getBoundingInfo().boundingBox;
+  }
+
+  private head(): Vector3 {
+    return this.scene.activeCamera?.globalPosition ?? Vector3.Zero();
+  }
+
+  private showWall(wall: any) {
+    this.wall = wall;
+    this.noWallShown = false;
+    this.options.xrEnvironment.previewWall(wall);
+    this.showGlow(wall);
+    this.clearTextAndButtons();
+
+    const { minimumWorld, maximumWorld } = this.wallBox();
+    const head = this.head();
+    const x = Math.min(Math.max(head.x, minimumWorld.x), maximumWorld.x);
+    const z = minimumWorld.z - IN_FRONT_OF_WALL;
+    this.texts.push(
+      new VoxelText(
+        this.scene,
+        TITLE,
+        new Vector3(x, head.y + TITLE_ABOVE_HEAD, z),
+        this.fittedCubeSize(TITLE, TEXT_CUBE_SIZE),
+        TEXT_COLOR
+      )
+    );
+    const buttonY = head.y - BUTTONS_BELOW_HEAD;
+    this.addButton("START", "testRoomStart", new Vector3(x - BUTTON_SPACING, buttonY, z), START_COLOR, () => this.start());
+    this.addButton("BACK", "testRoomBack", new Vector3(x + BUTTON_SPACING, buttonY, z), BACK_COLOR, () => this.back());
+    this.updateWarnings();
+  }
+
+  private showGlow(wall: any) {
+    this.glow?.dispose();
+    const glow = wall.mesh.clone("testRoomGlow", null, true) as Mesh;
+    glow.parent = wall.mesh;
+    glow.position.setAll(0);
+    glow.rotationQuaternion = Quaternion.Identity();
+    glow.scaling.setAll(1);
+    glow.material = this.glowMaterial;
+    glow.visibility = 1;
+    glow.isPickable = false;
+    glow.checkCollisions = false;
+    this.glow = glow;
+  }
+
+  private showNoWall() {
+    this.noWallShown = true;
+    this.options.xrEnvironment.faceHead();
+    this.clearTextAndButtons();
+    const head = this.head();
+    const z = head.z + NO_WALL_DISTANCE;
+    this.texts.push(
+      new VoxelText(
+        this.scene,
+        NO_WALL_TITLE,
+        new Vector3(head.x, head.y + TITLE_ABOVE_HEAD, z),
+        TEXT_CUBE_SIZE,
+        TEXT_COLOR
+      )
+    );
+    this.addButton("BACK", "testRoomBack", new Vector3(head.x, head.y - BUTTONS_BELOW_HEAD, z), BACK_COLOR, () => this.back());
+  }
+
+  private fittedCubeSize(text: string, cubeSize: number): number {
+    const { minimumWorld, maximumWorld } = this.wallBox();
+    const room = (maximumWorld.x - minimumWorld.x) * MAX_TEXT_WIDTH_OF_WALL;
+    return Math.min(cubeSize, (cubeSize * room) / voxelTextWidth(text, cubeSize));
+  }
+
+  private updateWarnings() {
+    const { minimumWorld, maximumWorld } = this.wallBox();
+    const head = this.head();
+    const warnings = roomWarnings(
+      {
+        width: maximumWorld.x - minimumWorld.x,
+        distanceFromHead: minimumWorld.z - head.z,
+      },
+      this.options.limits
+    );
+    const key = warnings.join("|");
+    if (key === this.warningsShown) return;
+    this.warningsShown = key;
+    this.clearWarnings();
+    const x = Math.min(Math.max(head.x, minimumWorld.x), maximumWorld.x);
+    const z = minimumWorld.z - IN_FRONT_OF_WALL;
+    warnings.forEach((warning, index) => {
+      this.warningTexts.push(
+        new VoxelText(
+          this.scene,
+          warning,
+          new Vector3(x, head.y + TITLE_ABOVE_HEAD - WARNING_GAP * (index + 1), z),
+          this.fittedCubeSize(warning, WARNING_CUBE_SIZE),
+          WARNING_COLOR
+        )
+      );
+    });
+  }
+
+  private addButton(label: string, type: string, center: Vector3, color: Color3, action: () => void) {
+    const button: VoxelButton = new VoxelButton(this.scene, {
+      label,
+      type,
+      center,
+      cubeSize: BUTTON_CUBE_SIZE,
+      color,
+      getAimRay: this.options.getAimRay,
+      onShot: () => this.buttonShot(button, action),
+    });
+    this.buttons.push(button);
+  }
+
+  // The shot button bursts, then its action runs.
+  private buttonShot(shot: VoxelButton, action: () => void) {
+    this.finishing = true;
+    GameAssetManager.existingInstance().playSound("mothership-explosion");
+    this.buttons
+      .filter((button) => button !== shot)
+      .forEach((button) => button.disable());
+    shot.burst(action);
+  }
+
+  private start() {
+    const wall = this.wall;
+    this.dispose();
+    this.options.onStart();
+    this.options.xrEnvironment.lockWall(wall);
+  }
+
+  private back() {
+    this.dispose();
+    this.options.onBack();
+  }
+
+  private clearWarnings() {
+    this.warningTexts.forEach((text) => text.dispose());
+    this.warningTexts = [];
+  }
+
+  private clearTextAndButtons() {
+    this.texts.forEach((text) => text.dispose());
+    this.texts = [];
+    this.clearWarnings();
+    this.warningsShown = "";
+    this.buttons.forEach((button) => button.dispose());
+    this.buttons = [];
+  }
+
+  // Safe to call more than once, and after the session has removed the room's planes.
+  public dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.observer) {
+      this.scene.onBeforeRenderObservable.remove(this.observer);
+      this.observer = null;
+    }
+    this.clearTextAndButtons();
+    if (this.glow && !this.glow.isDisposed()) this.glow.dispose();
+    this.glow = null;
+    this.glowMaterial.dispose();
+    this.outlines.forEach((outline) => {
+      if (!outline.isDisposed()) outline.dispose();
+    });
+    this.outlines.clear();
+  }
+}
