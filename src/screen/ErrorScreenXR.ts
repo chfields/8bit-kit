@@ -32,8 +32,11 @@ export class ErrorScreenXR {
     mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
     this.mesh = mesh;
     this.observer = this.scene.onBeforeRenderObservable.add(() => {
-      const ray = this.scene.activeCamera?.getForwardRay();
-      if (ray) {
+      const camera = this.scene.activeCamera;
+      if (camera) {
+        // The mesh has no parent, so it needs where the head is in the world, which isn't
+        // the camera's own position once the world has turned.
+        const ray = camera.getForwardRay(100, undefined, camera.globalPosition);
         mesh.position.copyFrom(
           ray.origin.add(ray.direction.scale(MESSAGE_DISTANCE))
         );

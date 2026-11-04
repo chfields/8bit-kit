@@ -69,6 +69,9 @@ export class XREnvironment {
   private openPortalLater: Nullable<(start: PortalStart) => void> = null;
   // Walls aren't picked automatically while the player chooses one in Test Room.
   private choosingWall = false;
+  // The player chose the wall and may have looked away since, including when planes arrive
+  // late. The world is already turned to that wall, so left is along -X, not the head's left.
+  private wallLocked = false;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -239,7 +242,9 @@ export class XREnvironment {
   private findLeftWall(camera: Camera, planes: any[]) {
     const ray = new Ray(
       camera.globalPosition,
-      camera.getDirection(new Vector3(-1, 0, 0))
+      this.wallLocked
+        ? new Vector3(-1, 0, 0)
+        : camera.getDirection(new Vector3(-1, 0, 0))
     );
     return this.findBasedOnCamera(camera, planes, ray, "wall");
   }
@@ -427,6 +432,7 @@ export class XREnvironment {
     this.lastCheckTime = 0;
     this.roomCaptureTried = false;
     this.choosingWall = false;
+    this.wallLocked = false;
     this.hideMessage();
     this.portal?.dispose();
     this.portal = null;
@@ -584,6 +590,7 @@ export class XREnvironment {
     if (!camera) return;
     this.previewWall(wall);
     this.choosingWall = false;
+    this.wallLocked = true;
     this.foundPlane = wall;
     this.hideMessage();
     const center = wall.mesh.getBoundingInfo().boundingBox.centerWorld;
