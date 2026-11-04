@@ -73,6 +73,16 @@ start screen, and have it call:
 observers to start its opening. Call `testRoom.dispose()` when the session ends. It's safe
 to call more than once. The pistol must be able to fire before a stage exists.
 
+## Hold to exit
+
+Holding X on the left controller for 2 seconds leaves the session, with a bar showing the
+time left. A game creates one when XR starts, and disposes it when XR ends:
+
+    const holdToExit = new HoldToExit({ xrEnvironment, scene, onExit });
+
+`onExit` should exit XR. A game should tell players about it, and shouldn't use X for
+anything else.
+
 ## What a game must provide
 
 This kit is for my own games. It's public so that their builds can install it without a
