@@ -327,6 +327,29 @@ export class TestRoom {
     shot.burst(action);
   }
 
+  // The nearest button the aim ray is on, if the room can still respond.
+  private aimedButton(): Nullable<{ button: VoxelButton; distance: number }> {
+    if (this.finishing || this.disposed) return null;
+    let nearest: Nullable<{ button: VoxelButton; distance: number }> = null;
+    for (const button of this.buttons) {
+      const distance = button.aimedDistance();
+      if (distance !== null && (!nearest || distance < nearest.distance)) {
+        nearest = { button, distance };
+      }
+    }
+    return nearest;
+  }
+
+  // For games with no pistol, on a trigger pull. Returns whether it pressed a button.
+  public pressAimed(): boolean {
+    return this.aimedButton()?.button.press() ?? false;
+  }
+
+  // How far away the aimed button is, so an aim line can end there. Null if there isn't one.
+  public aimedDistance(): Nullable<number> {
+    return this.aimedButton()?.distance ?? null;
+  }
+
   private start() {
     const wall = this.wall;
     this.dispose();

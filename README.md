@@ -73,6 +73,40 @@ start screen, and have it call:
 observers to start its opening. Call `testRoom.dispose()` when the session ends. It's safe
 to call more than once. The pistol must be able to fire before a stage exists.
 
+A game with no pistol can skip both `TEST_ROOM_BUTTON_TYPES` and that last rule. It listens to
+the trigger itself, and on a pull calls:
+
+    testRoom.pressAimed();
+
+That presses the button `getAimRay`'s ray is on, and returns whether it pressed one. It does
+nothing once the room is finishing or disposed. `testRoom.aimedDistance()` gives the distance
+to that button, or null, so an aim line can end there.
+
+## Pressing a button without a bullet
+
+`VoxelButton.press()` does what a bullet hit does: `onShot` fires once, however the button gets
+pressed. It returns whether it pressed the button, and does nothing if the button is disabled,
+disposed, has burst or has already been pressed. `isAimedAt()` says whether `getAimRay`'s ray
+is on the button, and `aimedDistance()` says how far along the ray it is, or null.
+
+## Aim line
+
+A thin glowing line along a controller's aim, for games and screens with no pistol. The kit
+leaves Babylon's own laser pointer off.
+
+    const aimLine = new AimLine({ scene, getAimRay, color, length }); // The last two are optional.
+    aimLine.setTarget(testRoom.aimedDistance(), color);
+    aimLine.dispose();
+
+It follows `getAimRay` every frame, and hides when the ray is null. With no target it runs its
+length, 2 m by default, and fades out. With a target it stops at that distance, solid, in the
+colour given, or yellow if there's none. Call `setTarget` each frame if the target can change.
+
+Nothing can pick it or hit it, so it doesn't block bullets or button rays. Like the kit's text,
+it draws in rendering group 1, so it shows in front of the room's surfaces and is hidden behind
+them. That relies on the depth rule below. A game owns one per hand if it wants both, and
+disposes them when it's finished.
+
 ## Hold to exit
 
 Holding X on the left controller for 2 seconds leaves the session, with a bar showing the
