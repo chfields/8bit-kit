@@ -1,13 +1,15 @@
 import { Ray } from "@babylonjs/core/Culling/ray";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { LinesMesh } from "@babylonjs/core/Meshes/linesMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { PolygonMeshBuilder } from "@babylonjs/core/Meshes/polygonMesh";
 import { Observer } from "@babylonjs/core/Misc/observable";
 import { Scene } from "@babylonjs/core/scene";
 import { Nullable } from "@babylonjs/core/types";
+import earcut from "earcut";
 import { GameAssetManager } from "../assets/GameAssetManager";
 import { VoxelText, voxelTextWidth } from "../effects/VoxelText";
 import { VoxelButton } from "../screen/VoxelButton";
@@ -43,6 +45,9 @@ const START_COLOR = new Color3(0.2, 0.95, 0.3);
 const BACK_COLOR = new Color3(0.95, 0.2, 0.2);
 const SURFACE_COLOR = new Color3(0.6, 0.6, 0.8);
 const SURFACE_ALPHA = 0.2;
+// local-floor puts the floor here, for when no floor has been scanned.
+const DEFAULT_FLOOR_Y = 0;
+const MIN_BLOCK_HEIGHT = 0.01;
 
 export type TestRoomOptions = {
   xrEnvironment: XREnvironment;
@@ -68,7 +73,7 @@ export class TestRoom {
   private glow: Nullable<Mesh> = null;
   private glowMaterial: StandardMaterial;
   private surfaceMaterial: StandardMaterial;
-  private surfaces = new Map<any, { fill: Mesh; outline: LinesMesh }>();
+  private surfaces = new Map<any, { fill: Mesh; outline: LinesMesh; floorY?: number }>();
   private texts: VoxelText[] = [];
   private warningTexts: VoxelText[] = [];
   private warningsShown = "";
@@ -113,9 +118,10 @@ export class TestRoom {
   private updateSurfaces() {
     const environment = this.options.xrEnvironment;
     const walls = environment.getWallPlanes().filter((wall) => wall !== this.wall);
-    walls.forEach((plane) => this.addSurface(plane, "testRoomWall"));
+    walls.forEach((plane) => this.addWall(plane));
     const furniture = environment.getPathFurniturePlanes(this.wall);
-    furniture.forEach((plane) => this.addSurface(plane, "testRoomFurniture"));
+    const floorY = environment.getFloorY(DEFAULT_FLOOR_Y);
+    furniture.forEach((plane) => this.addFurniture(plane, floorY));
     const shown = new Set([...walls, ...furniture]);
     this.surfaces.forEach(({ fill, outline }, plane) => {
       fill.setEnabled(shown.has(plane));
@@ -123,30 +129,77 @@ export class TestRoom {
     });
   }
 
-  private addSurface(plane: any, name: string) {
+  private addWall(plane: any) {
     if (this.surfaces.has(plane)) return;
-    const fill = plane.mesh.clone(name, null, true) as Mesh;
-    fill.parent = plane.mesh;
+    const fill = plane.mesh.clone("testRoomWall", null, true) as Mesh;
     fill.position.setAll(0);
     fill.rotationQuaternion = Quaternion.Identity();
     fill.scaling.setAll(1);
+    const outline = MeshBuilder.CreateLines(
+      "testRoomOutline",
+      { points: this.corners(plane, 0) },
+      this.scene
+    );
+    this.surfaces.set(plane, this.finishSurface(plane, fill, outline));
+  }
+
+  // A block from the surface down to the floor, which is the space paths keep out of. Only the
+  // Test Room draws this: in the game, the surface stays flat.
+  private addFurniture(plane: any, floorY: number) {
+    const existing = this.surfaces.get(plane);
+    // The floor can be scanned after the furniture.
+    if (existing?.floorY === floorY) return;
+    if (existing) this.disposeSurface(existing);
+    const bottom = this.floorInPlane(plane, floorY);
+    const fill = new PolygonMeshBuilder(
+      "testRoomFurniture",
+      plane.polygonDefinition.map((p: any) => new Vector2(p.x, p.z)),
+      this.scene,
+      earcut
+    ).build(false, Math.abs(bottom));
+    // It's built downwards along the plane's y, which may point either way.
+    fill.scaling.y = bottom < 0 ? 1 : -1;
+    const top = this.corners(plane, 0);
+    const base = this.corners(plane, bottom);
+    const outline = MeshBuilder.CreateLineSystem(
+      "testRoomOutline",
+      { lines: [top, base, ...top.map((corner, i) => [corner, base[i]])] },
+      this.scene
+    );
+    this.surfaces.set(plane, { ...this.finishSurface(plane, fill, outline), floorY });
+  }
+
+  // How far the floor is along the plane's own y. Never zero, so the block has a height.
+  private floorInPlane(plane: any, floorY: number): number {
+    plane.mesh.computeWorldMatrix(true);
+    const { centerWorld } = plane.mesh.getBoundingInfo().boundingBox;
+    const floor = new Vector3(centerWorld.x, floorY, centerWorld.z);
+    const { y } = Vector3.TransformCoordinates(
+      floor,
+      plane.mesh.getWorldMatrix().clone().invert()
+    );
+    return Math.abs(y) < MIN_BLOCK_HEIGHT ? -MIN_BLOCK_HEIGHT : y;
+  }
+
+  private corners(plane: any, y: number): Vector3[] {
+    return plane.polygonDefinition.map((p: any) => new Vector3(p.x, y, p.z));
+  }
+
+  private finishSurface(plane: any, fill: Mesh, outline: LinesMesh) {
+    fill.parent = plane.mesh;
     fill.material = this.surfaceMaterial;
     fill.visibility = 1;
     fill.isPickable = false;
     fill.checkCollisions = false;
-    const outline = MeshBuilder.CreateLines(
-      "testRoomOutline",
-      {
-        points: plane.polygonDefinition.map(
-          (p: any) => new Vector3(p.x, 0, p.z)
-        ),
-      },
-      this.scene
-    );
     outline.color = SURFACE_COLOR;
     outline.isPickable = false;
     outline.parent = plane.mesh;
-    this.surfaces.set(plane, { fill, outline });
+    return { fill, outline };
+  }
+
+  private disposeSurface({ fill, outline }: { fill: Mesh; outline: LinesMesh }) {
+    if (!fill.isDisposed()) fill.dispose();
+    if (!outline.isDisposed()) outline.dispose();
   }
 
   private wallBox() {
@@ -312,10 +365,7 @@ export class TestRoom {
     if (this.glow && !this.glow.isDisposed()) this.glow.dispose();
     this.glow = null;
     this.glowMaterial.dispose();
-    this.surfaces.forEach(({ fill, outline }) => {
-      if (!fill.isDisposed()) fill.dispose();
-      if (!outline.isDisposed()) outline.dispose();
-    });
+    this.surfaces.forEach((surface) => this.disposeSurface(surface));
     this.surfaces.clear();
     this.surfaceMaterial.dispose();
   }
