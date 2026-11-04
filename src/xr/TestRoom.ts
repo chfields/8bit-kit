@@ -41,7 +41,8 @@ const TEXT_COLOR = new Color3(0.2, 1, 0.9);
 const WARNING_COLOR = new Color3(1, 0.8, 0.1);
 const START_COLOR = new Color3(0.2, 0.95, 0.3);
 const BACK_COLOR = new Color3(0.95, 0.2, 0.2);
-const OUTLINE_COLOR = new Color3(0.6, 0.6, 0.8);
+const FURNITURE_COLOR = new Color3(0.6, 0.6, 0.8);
+const FURNITURE_ALPHA = 0.2;
 
 export type TestRoomOptions = {
   xrEnvironment: XREnvironment;
@@ -66,7 +67,8 @@ export class TestRoom {
   private wall: any = null;
   private glow: Nullable<Mesh> = null;
   private glowMaterial: StandardMaterial;
-  private outlines = new Map<any, LinesMesh>();
+  private furnitureMaterial: StandardMaterial;
+  private furniture = new Map<any, { fill: Mesh; outline: LinesMesh }>();
   private texts: VoxelText[] = [];
   private warningTexts: VoxelText[] = [];
   private warningsShown = "";
@@ -83,6 +85,11 @@ export class TestRoom {
     this.glowMaterial.emissiveColor = GLOW_COLOR;
     this.glowMaterial.alpha = GLOW_ALPHA;
     this.glowMaterial.backFaceCulling = false;
+    this.furnitureMaterial = new StandardMaterial("testRoomFurniture", this.scene);
+    this.furnitureMaterial.disableLighting = true;
+    this.furnitureMaterial.emissiveColor = FURNITURE_COLOR;
+    this.furnitureMaterial.alpha = FURNITURE_ALPHA;
+    this.furnitureMaterial.backFaceCulling = false;
     this.observer = this.scene.onBeforeRenderObservable.add(() => this.tick());
   }
 
@@ -90,7 +97,6 @@ export class TestRoom {
     const now = performance.now();
     if (this.finishing || now - this.lastCheck < CHECK_INTERVAL_MS) return;
     this.lastCheck = now;
-    this.outlineNewFurniture();
     const faced = this.options.xrEnvironment.getFacedWall();
     if (faced && faced !== this.wall) {
       this.showWall(faced);
@@ -99,25 +105,46 @@ export class TestRoom {
     } else if (!this.noWallShown) {
       this.showNoWall();
     }
+    this.updateFurniture();
   }
 
-  private outlineNewFurniture() {
-    this.options.xrEnvironment.getFurniturePlanes().forEach((plane) => {
-      if (this.outlines.has(plane)) return;
-      const outline = MeshBuilder.CreateLines(
-        "testRoomOutline",
-        {
-          points: plane.polygonDefinition.map(
-            (p: any) => new Vector3(p.x, 0, p.z)
-          ),
-        },
-        this.scene
-      );
-      outline.color = OUTLINE_COLOR;
-      outline.isPickable = false;
-      outline.parent = plane.mesh;
-      this.outlines.set(plane, outline);
+  // Shows the furniture that paths would keep clear of with this wall as the portal.
+  private updateFurniture() {
+    const shown = new Set(
+      this.options.xrEnvironment.getPathFurniturePlanes(this.wall)
+    );
+    shown.forEach((plane) => {
+      if (!this.furniture.has(plane)) this.furniture.set(plane, this.createFurniture(plane));
     });
+    this.furniture.forEach(({ fill, outline }, plane) => {
+      fill.setEnabled(shown.has(plane));
+      outline.setEnabled(shown.has(plane));
+    });
+  }
+
+  private createFurniture(plane: any) {
+    const fill = plane.mesh.clone("testRoomFurniture", null, true) as Mesh;
+    fill.parent = plane.mesh;
+    fill.position.setAll(0);
+    fill.rotationQuaternion = Quaternion.Identity();
+    fill.scaling.setAll(1);
+    fill.material = this.furnitureMaterial;
+    fill.visibility = 1;
+    fill.isPickable = false;
+    fill.checkCollisions = false;
+    const outline = MeshBuilder.CreateLines(
+      "testRoomOutline",
+      {
+        points: plane.polygonDefinition.map(
+          (p: any) => new Vector3(p.x, 0, p.z)
+        ),
+      },
+      this.scene
+    );
+    outline.color = FURNITURE_COLOR;
+    outline.isPickable = false;
+    outline.parent = plane.mesh;
+    return { fill, outline };
   }
 
   private wallBox() {
@@ -283,9 +310,11 @@ export class TestRoom {
     if (this.glow && !this.glow.isDisposed()) this.glow.dispose();
     this.glow = null;
     this.glowMaterial.dispose();
-    this.outlines.forEach((outline) => {
+    this.furniture.forEach(({ fill, outline }) => {
+      if (!fill.isDisposed()) fill.dispose();
       if (!outline.isDisposed()) outline.dispose();
     });
-    this.outlines.clear();
+    this.furniture.clear();
+    this.furnitureMaterial.dispose();
   }
 }

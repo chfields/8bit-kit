@@ -40,7 +40,8 @@ export type Furniture = {
 
 const NOT_FURNITURE = ["wall", "floor", "ceiling"];
 const MAX_SURFACE_THICKNESS = 0.2;
-// Furniture this close to the portal's wall doesn't cut into the portal, which draws over it.
+// The portal draws over furniture whose near edge is this close to its wall. Paths only ignore
+// furniture that's entirely this close, so they still avoid a deep table against the wall.
 const PORTAL_FURNITURE_GAP = 0.5;
 
 export class XREnvironment {
@@ -454,7 +455,7 @@ export class XREnvironment {
     if (plane.id === this.foundPlane?.id) {
       this.processFoundPlane(polygonMesh, plane);
     } else {
-      if (plane.facingPlane || this.isFurnitureAtPortal(plane)) {
+      if (plane.facingPlane || this.isFurnitureAtWall(plane, this.foundPlane)) {
         // hide any walls behind the portal, and furniture right in front of it
         const material = new StandardMaterial("hidden", this.scene);
         material.alpha = 0.0;
@@ -469,15 +470,16 @@ export class XREnvironment {
     }
   }
 
-  private isFurnitureAtPortal(plane: any): boolean {
+  // The wall must already face +Z.
+  private isFurnitureAtWall(plane: any, wall: any): boolean {
     const label = plane.xrPlane.semanticLabel ?? "";
-    if (NOT_FURNITURE.includes(label) || !this.foundPlane?.mesh) return false;
-    this.foundPlane.mesh.computeWorldMatrix(true);
+    if (NOT_FURNITURE.includes(label) || !wall?.mesh) return false;
+    wall.mesh.computeWorldMatrix(true);
     plane.mesh.computeWorldMatrix(true);
-    const wallZ = this.foundPlane.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
+    const wallZ = wall.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
     const { maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
     const gap = wallZ - maximumWorld.z;
-    log.debug("Furniture", label, "gap to portal wall", gap.toFixed(2));
+    log.debug("Furniture", label, "gap to wall", gap.toFixed(2));
     return gap < PORTAL_FURNITURE_GAP;
   }
 
@@ -576,11 +578,22 @@ export class XREnvironment {
     this.turnWorld(-Math.atan2(x, z), camera);
   }
 
-  public getFurniturePlanes(): any[] {
-    return this.planes.filter(
-      (plane) =>
-        plane.mesh && !NOT_FURNITURE.includes(plane.xrPlane.semanticLabel ?? "")
-    );
+  // The furniture that paths and obstacles keep clear of when this wall is the portal. The wall
+  // must already face +Z. Upright surfaces have no top to fly over, so they don't count.
+  // Nor does furniture entirely beside the wall.
+  public getPathFurniturePlanes(wall: any): any[] {
+    return this.planes.filter((plane) => {
+      const label = plane.xrPlane.semanticLabel ?? "";
+      if (!plane.mesh || NOT_FURNITURE.includes(label)) return false;
+      plane.mesh.computeWorldMatrix(true);
+      const { minimumWorld, maximumWorld } =
+        plane.mesh.getBoundingInfo().boundingBox;
+      if (maximumWorld.y - minimumWorld.y > MAX_SURFACE_THICKNESS) return false;
+      if (!wall?.mesh) return true;
+      wall.mesh.computeWorldMatrix(true);
+      const wallZ = wall.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
+      return wallZ - minimumWorld.z >= PORTAL_FURNITURE_GAP;
+    });
   }
 
   // Chooses this wall, then carries on as if it had been found normally. The ray goes
@@ -602,24 +615,17 @@ export class XREnvironment {
   }
 
   public getFurniture(): Furniture[] {
-    const furniture: Furniture[] = [];
-    this.planes.forEach((plane) => {
-      const label = plane.xrPlane.semanticLabel ?? "";
-      if (!plane.mesh || NOT_FURNITURE.includes(label)) return;
-      plane.mesh.computeWorldMatrix(true);
+    return this.getPathFurniturePlanes(this.foundPlane).map((plane) => {
       const { minimumWorld, maximumWorld } =
         plane.mesh.getBoundingInfo().boundingBox;
-      // Upright surfaces, like the side of a cupboard, have no top to fly over.
-      if (maximumWorld.y - minimumWorld.y > MAX_SURFACE_THICKNESS) return;
-      furniture.push({
+      return {
         minX: minimumWorld.x,
         maxX: maximumWorld.x,
         minZ: minimumWorld.z,
         maxZ: maximumWorld.z,
         topY: maximumWorld.y,
-      });
+      };
     });
-    return furniture;
   }
 
   // Walls and ceilings other than the portal wall. Normals point into the room.
