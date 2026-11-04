@@ -549,8 +549,9 @@ export class XREnvironment {
     this.planes.forEach((plane) => {
       if (plane.mesh && this.isWall(plane)) walls.set(plane.mesh, plane);
     });
-    const picked = this.scene.pickWithRay(camera.getForwardRay(), (mesh) =>
-      walls.has(mesh)
+    const picked = this.scene.pickWithRay(
+      camera.getForwardRay(100, undefined, camera.globalPosition),
+      (mesh) => walls.has(mesh)
     );
     return picked?.hit ? walls.get(picked.pickedMesh) ?? null : null;
   }
