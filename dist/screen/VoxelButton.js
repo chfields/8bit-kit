@@ -46,6 +46,12 @@ export class VoxelButton {
             writable: true,
             value: void 0
         });
+        Object.defineProperty(this, "shot", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
         this.scene = scene;
         this.center = options.center;
         this.getAimRay = options.getAimRay;
@@ -66,7 +72,12 @@ export class VoxelButton {
         hitArea.checkCollisions = true;
         hitArea.collisionGroup = CollisionGroup.BUTTON;
         hitArea.metadata = { type: options.type };
-        hitArea.onDispose = () => options.onShot();
+        hitArea.onDispose = () => {
+            if (this.shot)
+                return;
+            this.shot = true;
+            options.onShot();
+        };
         return hitArea;
     }
     startIdleAnimation() {
@@ -74,11 +85,7 @@ export class VoxelButton {
         this.observer = this.scene.onBeforeRenderObservable.add(() => {
             const bob = Math.sin(performance.now() * BOB_SPEED + phase) * BOB_HEIGHT;
             this.text.moveTo(this.center.add(new Vector3(0, bob, 0)));
-            const ray = this.getAimRay();
-            const aimedAt = !!(ray &&
-                this.hitArea &&
-                ray.intersectsMesh(this.hitArea).hit);
-            this.text.setHighlighted(aimedAt);
+            this.text.setHighlighted(this.isAimedAt());
         });
     }
     stopIdleAnimation() {
@@ -86,6 +93,24 @@ export class VoxelButton {
             this.scene.onBeforeRenderObservable.remove(this.observer);
             this.observer = null;
         }
+    }
+    // How far along the aim ray the button is, or null if the ray isn't on it.
+    aimedDistance() {
+        if (this.shot || !this.hitArea)
+            return null;
+        const hit = this.getAimRay()?.intersectsMesh(this.hitArea);
+        return hit?.hit ? hit.distance : null;
+    }
+    isAimedAt() {
+        return this.aimedDistance() !== null;
+    }
+    // Does what a bullet does, for games with no pistol. Returns whether it pressed the button.
+    // Removing the hit area is what fires onShot, once, whichever of them gets there first.
+    press() {
+        if (this.shot || !this.hitArea)
+            return false;
+        this.hitArea.dispose();
+        return true;
     }
     // Stops the button responding to shots.
     disable() {

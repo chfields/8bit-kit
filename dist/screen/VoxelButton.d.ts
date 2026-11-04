@@ -19,10 +19,14 @@ export declare class VoxelButton {
     private observer;
     private center;
     private getAimRay;
+    private shot;
     constructor(scene: Scene, options: VoxelButtonOptions);
     private createHitArea;
     private startIdleAnimation;
     private stopIdleAnimation;
+    aimedDistance(): Nullable<number>;
+    isAimedAt(): boolean;
+    press(): boolean;
     disable(): void;
     burst(onDone: () => void): void;
     dispose(): void;

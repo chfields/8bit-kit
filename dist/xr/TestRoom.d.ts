@@ -48,6 +48,9 @@ export declare class TestRoom {
     private updateWarnings;
     private addButton;
     private buttonShot;
+    private aimedButton;
+    pressAimed(): boolean;
+    aimedDistance(): Nullable<number>;
     private start;
     private back;
     private clearWarnings;
