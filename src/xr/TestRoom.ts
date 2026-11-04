@@ -27,6 +27,8 @@ const BUTTON_CUBE_SIZE = 0.02;
 // Text never takes more of the wall than this.
 const MAX_TEXT_WIDTH_OF_WALL = 0.9;
 const IN_FRONT_OF_WALL = 0.3;
+// Text and buttons never sit closer than this to the player's head, even beside a near wall.
+const MIN_FROM_HEAD = 0.5;
 const TITLE_ABOVE_HEAD = 0.45;
 const WARNING_GAP = 0.15;
 const BUTTONS_BELOW_HEAD = 0.25;
@@ -70,6 +72,8 @@ export class TestRoom {
   private warningsShown = "";
   private buttons: VoxelButton[] = [];
   private noWallShown = false;
+  // Where the title, buttons and warnings sit for the current wall, fixed when the wall is first shown.
+  private placement = new Vector3();
 
   constructor(options: TestRoomOptions) {
     this.options = options;
@@ -135,7 +139,8 @@ export class TestRoom {
     const { minimumWorld, maximumWorld } = this.wallBox();
     const head = this.head();
     const x = Math.min(Math.max(head.x, minimumWorld.x), maximumWorld.x);
-    const z = minimumWorld.z - IN_FRONT_OF_WALL;
+    const z = Math.max(minimumWorld.z - IN_FRONT_OF_WALL, head.z + MIN_FROM_HEAD);
+    this.placement.set(x, head.y, z);
     this.texts.push(
       new VoxelText(
         this.scene,
@@ -203,14 +208,13 @@ export class TestRoom {
     if (key === this.warningsShown) return;
     this.warningsShown = key;
     this.clearWarnings();
-    const x = Math.min(Math.max(head.x, minimumWorld.x), maximumWorld.x);
-    const z = minimumWorld.z - IN_FRONT_OF_WALL;
+    const { x, y, z } = this.placement;
     warnings.forEach((warning, index) => {
       this.warningTexts.push(
         new VoxelText(
           this.scene,
           warning,
-          new Vector3(x, head.y + TITLE_ABOVE_HEAD - WARNING_GAP * (index + 1), z),
+          new Vector3(x, y + TITLE_ABOVE_HEAD - WARNING_GAP * (index + 1), z),
           this.fittedCubeSize(warning, WARNING_CUBE_SIZE),
           WARNING_COLOR
         )
