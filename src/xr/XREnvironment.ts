@@ -578,6 +578,10 @@ export class XREnvironment {
     this.turnWorld(-Math.atan2(x, z), camera);
   }
 
+  public getWallPlanes(): any[] {
+    return this.planes.filter((plane) => plane.mesh && this.isWall(plane));
+  }
+
   // The furniture that paths and obstacles keep clear of when this wall is the portal. The wall
   // must already face +Z. Upright surfaces have no top to fly over, so they don't count.
   // Nor does furniture entirely beside the wall.

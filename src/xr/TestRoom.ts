@@ -41,8 +41,8 @@ const TEXT_COLOR = new Color3(0.2, 1, 0.9);
 const WARNING_COLOR = new Color3(1, 0.8, 0.1);
 const START_COLOR = new Color3(0.2, 0.95, 0.3);
 const BACK_COLOR = new Color3(0.95, 0.2, 0.2);
-const FURNITURE_COLOR = new Color3(0.6, 0.6, 0.8);
-const FURNITURE_ALPHA = 0.2;
+const SURFACE_COLOR = new Color3(0.6, 0.6, 0.8);
+const SURFACE_ALPHA = 0.2;
 
 export type TestRoomOptions = {
   xrEnvironment: XREnvironment;
@@ -67,8 +67,8 @@ export class TestRoom {
   private wall: any = null;
   private glow: Nullable<Mesh> = null;
   private glowMaterial: StandardMaterial;
-  private furnitureMaterial: StandardMaterial;
-  private furniture = new Map<any, { fill: Mesh; outline: LinesMesh }>();
+  private surfaceMaterial: StandardMaterial;
+  private surfaces = new Map<any, { fill: Mesh; outline: LinesMesh }>();
   private texts: VoxelText[] = [];
   private warningTexts: VoxelText[] = [];
   private warningsShown = "";
@@ -85,11 +85,11 @@ export class TestRoom {
     this.glowMaterial.emissiveColor = GLOW_COLOR;
     this.glowMaterial.alpha = GLOW_ALPHA;
     this.glowMaterial.backFaceCulling = false;
-    this.furnitureMaterial = new StandardMaterial("testRoomFurniture", this.scene);
-    this.furnitureMaterial.disableLighting = true;
-    this.furnitureMaterial.emissiveColor = FURNITURE_COLOR;
-    this.furnitureMaterial.alpha = FURNITURE_ALPHA;
-    this.furnitureMaterial.backFaceCulling = false;
+    this.surfaceMaterial = new StandardMaterial("testRoomSurface", this.scene);
+    this.surfaceMaterial.disableLighting = true;
+    this.surfaceMaterial.emissiveColor = SURFACE_COLOR;
+    this.surfaceMaterial.alpha = SURFACE_ALPHA;
+    this.surfaceMaterial.backFaceCulling = false;
     this.observer = this.scene.onBeforeRenderObservable.add(() => this.tick());
   }
 
@@ -105,30 +105,32 @@ export class TestRoom {
     } else if (!this.noWallShown) {
       this.showNoWall();
     }
-    this.updateFurniture();
+    this.updateSurfaces();
   }
 
-  // Shows the furniture that paths would keep clear of with this wall as the portal.
-  private updateFurniture() {
-    const shown = new Set(
-      this.options.xrEnvironment.getPathFurniturePlanes(this.wall)
-    );
-    shown.forEach((plane) => {
-      if (!this.furniture.has(plane)) this.furniture.set(plane, this.createFurniture(plane));
-    });
-    this.furniture.forEach(({ fill, outline }, plane) => {
+  // Shows the walls other than the glowing one, and the furniture that paths would keep clear
+  // of with the glowing wall as the portal.
+  private updateSurfaces() {
+    const environment = this.options.xrEnvironment;
+    const walls = environment.getWallPlanes().filter((wall) => wall !== this.wall);
+    walls.forEach((plane) => this.addSurface(plane, "testRoomWall"));
+    const furniture = environment.getPathFurniturePlanes(this.wall);
+    furniture.forEach((plane) => this.addSurface(plane, "testRoomFurniture"));
+    const shown = new Set([...walls, ...furniture]);
+    this.surfaces.forEach(({ fill, outline }, plane) => {
       fill.setEnabled(shown.has(plane));
       outline.setEnabled(shown.has(plane));
     });
   }
 
-  private createFurniture(plane: any) {
-    const fill = plane.mesh.clone("testRoomFurniture", null, true) as Mesh;
+  private addSurface(plane: any, name: string) {
+    if (this.surfaces.has(plane)) return;
+    const fill = plane.mesh.clone(name, null, true) as Mesh;
     fill.parent = plane.mesh;
     fill.position.setAll(0);
     fill.rotationQuaternion = Quaternion.Identity();
     fill.scaling.setAll(1);
-    fill.material = this.furnitureMaterial;
+    fill.material = this.surfaceMaterial;
     fill.visibility = 1;
     fill.isPickable = false;
     fill.checkCollisions = false;
@@ -141,10 +143,10 @@ export class TestRoom {
       },
       this.scene
     );
-    outline.color = FURNITURE_COLOR;
+    outline.color = SURFACE_COLOR;
     outline.isPickable = false;
     outline.parent = plane.mesh;
-    return { fill, outline };
+    this.surfaces.set(plane, { fill, outline });
   }
 
   private wallBox() {
@@ -310,11 +312,11 @@ export class TestRoom {
     if (this.glow && !this.glow.isDisposed()) this.glow.dispose();
     this.glow = null;
     this.glowMaterial.dispose();
-    this.furniture.forEach(({ fill, outline }) => {
+    this.surfaces.forEach(({ fill, outline }) => {
       if (!fill.isDisposed()) fill.dispose();
       if (!outline.isDisposed()) outline.dispose();
     });
-    this.furniture.clear();
-    this.furnitureMaterial.dispose();
+    this.surfaces.clear();
+    this.surfaceMaterial.dispose();
   }
 }
