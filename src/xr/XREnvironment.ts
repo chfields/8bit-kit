@@ -67,6 +67,8 @@ export class XREnvironment {
   // faces along +Z, which is the direction all of the game code assumes.
   private wallAlignment: Nullable<TransformNode> = null;
   private openPortalLater: Nullable<(start: PortalStart) => void> = null;
+  // Walls aren't picked automatically while the player chooses one in Test Room.
+  private choosingWall = false;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -292,13 +294,16 @@ export class XREnvironment {
 
   // Safe to call repeatedly: only planes not yet processed are changed, so
   // planes that arrive late don't rebuild the portal.
-  private processPlanes(planes: any[]) {
+  private processPlanes(planes: any[], facingRay?: Ray) {
+    if (this.choosingWall) {
+      return;
+    }
     const camera = this.scene.activeCamera;
     if (!camera) {
       return;
     }
 
-    const forwardRay = camera.getForwardRay();
+    const forwardRay = facingRay ?? camera.getForwardRay();
     const newPlanes = planes.filter((plane) => !plane.processed && plane.mesh);
     newPlanes.forEach((plane) => {
       plane.facingPlane = this.findPlaneWithRay(plane, forwardRay);
@@ -325,23 +330,28 @@ export class XREnvironment {
   }
 
   private alignToWall(wall: any, camera: Camera) {
-    const normal = Vector3.TransformNormal(
-      Vector3.Up(),
-      wall.transformationMatrix
-    );
+    const matrix = this.wallAlignment
+      ? wall.transformationMatrix.multiply(this.wallAlignment.getWorldMatrix())
+      : wall.transformationMatrix;
+    const normal = Vector3.TransformNormal(Vector3.Up(), matrix);
     normal.y = 0;
     normal.normalize();
+    wall.mesh.computeWorldMatrix(true);
     const toWall = wall.mesh
       .getAbsolutePosition()
       .subtract(camera.globalPosition);
     const towardWall = Vector3.Dot(normal, toWall) < 0 ? normal.negate() : normal;
+    this.turnWorld(-Math.atan2(towardWall.x, towardWall.z), camera);
+  }
 
-    const alignment = new TransformNode("wallAlignment", this.scene);
-    alignment.rotation.y = -Math.atan2(towardWall.x, towardWall.z);
+  private turnWorld(byAngle: number, camera: Camera) {
+    if (!this.wallAlignment) {
+      this.wallAlignment = new TransformNode("wallAlignment", this.scene);
+      camera.parent = this.wallAlignment;
+    }
+    const alignment = this.wallAlignment;
+    alignment.rotation.y += byAngle;
     alignment.computeWorldMatrix(true);
-    this.wallAlignment = alignment;
-
-    camera.parent = alignment;
     camera.computeWorldMatrix();
     this.planes.forEach((plane) => {
       if (plane.mesh) {
@@ -416,6 +426,7 @@ export class XREnvironment {
     }
     this.lastCheckTime = 0;
     this.roomCaptureTried = false;
+    this.choosingWall = false;
     this.hideMessage();
     this.portal?.dispose();
     this.portal = null;
@@ -528,6 +539,58 @@ export class XREnvironment {
   public openPortal(start: PortalStart) {
     this.openPortalLater?.(start);
     this.openPortalLater = null;
+  }
+
+  // The wall straight ahead of the player, if any. Reads only.
+  public getFacedWall(): any | null {
+    const camera = this.scene.activeCamera;
+    if (!camera) return null;
+    const walls = new Map<unknown, any>();
+    this.planes.forEach((plane) => {
+      if (plane.mesh && this.isWall(plane)) walls.set(plane.mesh, plane);
+    });
+    const picked = this.scene.pickWithRay(camera.getForwardRay(), (mesh) =>
+      walls.has(mesh)
+    );
+    return picked?.hit ? walls.get(picked.pickedMesh) ?? null : null;
+  }
+
+  // Turns the world so this wall faces +Z, without choosing it.
+  public previewWall(wall: any) {
+    const camera = this.scene.activeCamera;
+    if (camera) this.alignToWall(wall, camera);
+  }
+
+  // Turns the world so the player looks along +Z, for showing text before any wall.
+  public faceHead() {
+    const camera = this.scene.activeCamera;
+    if (!camera) return;
+    const { x, z } = camera.getForwardRay().direction;
+    this.turnWorld(-Math.atan2(x, z), camera);
+  }
+
+  public getFurniturePlanes(): any[] {
+    return this.planes.filter(
+      (plane) =>
+        plane.mesh && !NOT_FURNITURE.includes(plane.xrPlane.semanticLabel ?? "")
+    );
+  }
+
+  // Chooses this wall, then carries on as if it had been found normally. The ray goes
+  // through the wall, as the player may be looking elsewhere while aiming the pistol.
+  public lockWall(wall: any) {
+    const camera = this.scene.activeCamera;
+    if (!camera) return;
+    this.previewWall(wall);
+    this.choosingWall = false;
+    this.foundPlane = wall;
+    this.hideMessage();
+    const center = wall.mesh.getBoundingInfo().boundingBox.centerWorld;
+    const head = camera.globalPosition;
+    this.processPlanes(
+      this.planes,
+      new Ray(head.clone(), center.subtract(head).normalize())
+    );
   }
 
   public getFurniture(): Furniture[] {
@@ -653,10 +716,11 @@ export class XREnvironment {
     this.setupPlaneDetection(featureManager);
   }
 
-  public async enterVR(): Promise<void> {
+  public async enterVR(options: { chooseWall?: boolean } = {}): Promise<void> {
     if (!this.xrHelper) {
       throw new Error("XR is not ready yet");
     }
+    this.choosingWall = options.chooseWall === true;
     await this.xrHelper.baseExperience.enterXRAsync(
       "immersive-ar",
       this.spaceType
