@@ -35,6 +35,8 @@ export declare class XREnvironment {
     private messageScreen;
     private wallAlignment;
     private openPortalLater;
+    private choosingWall;
+    private wallLocked;
     constructor(scene: Scene);
     hideEnterExitButton(): Promise<void>;
     enterExitObserver(observer: (exit: boolean) => void): Promise<void>;
@@ -52,6 +54,7 @@ export declare class XREnvironment {
     private isWall;
     private processPlanes;
     private alignToWall;
+    private turnWorld;
     private startWallSearch;
     private stopWallSearch;
     private searchForWall;
@@ -60,18 +63,26 @@ export declare class XREnvironment {
     private hideMessage;
     private resetSession;
     private processSinglePlane;
-    private isFurnitureAtPortal;
+    private isFurnitureAtWall;
     private findClosestPlane;
     private findClosestFacingPlane;
     private processFoundPlane;
     openPortal(start: PortalStart): void;
+    getFacedWall(): any | null;
+    previewWall(wall: any): void;
+    faceHead(): void;
+    getWallPlanes(): any[];
+    getPathFurniturePlanes(wall: any): any[];
+    lockWall(wall: any): void;
     getFurniture(): Furniture[];
     getRoomSurfaces(head: Vector3): RoomSurface[];
     getFloorY(fallback: number): number;
     private createSkybox;
     private setupMovement;
     private setupFeatures;
-    enterVR(): Promise<void>;
+    enterVR(options?: {
+        chooseWall?: boolean;
+    }): Promise<void>;
     isInXR(): boolean;
     exitXR(): void;
     setupController(): void;

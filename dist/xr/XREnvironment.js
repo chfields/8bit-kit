@@ -19,7 +19,8 @@ const PLANE_SCAN_TIMEOUT_MS = 5000;
 const WALL_SEARCH_INTERVAL_MS = 500;
 const NOT_FURNITURE = ["wall", "floor", "ceiling"];
 const MAX_SURFACE_THICKNESS = 0.2;
-// Furniture this close to the portal's wall doesn't cut into the portal, which draws over it.
+// The portal draws over furniture whose near edge is this close to its wall. Paths only ignore
+// furniture that's entirely this close, so they still avoid a deep table against the wall.
 const PORTAL_FURNITURE_GAP = 0.5;
 export class XREnvironment {
     constructor(scene) {
@@ -144,6 +145,21 @@ export class XREnvironment {
             configurable: true,
             writable: true,
             value: null
+        });
+        // Walls aren't picked automatically while the player chooses one in Test Room.
+        Object.defineProperty(this, "choosingWall", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        // The player chose the wall and may have looked away since, including when planes arrive
+        // late. The world is already turned to that wall, so left is along -X, not the head's left.
+        Object.defineProperty(this, "wallLocked", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
         });
         this.scene = scene;
         this.occluderMaterial = new StandardMaterial("om", scene);
@@ -271,7 +287,9 @@ export class XREnvironment {
         return null;
     }
     findLeftWall(camera, planes) {
-        const ray = new Ray(camera.globalPosition, camera.getDirection(new Vector3(-1, 0, 0)));
+        const ray = new Ray(camera.globalPosition, this.wallLocked
+            ? new Vector3(-1, 0, 0)
+            : camera.getDirection(new Vector3(-1, 0, 0)));
         return this.findBasedOnCamera(camera, planes, ray, "wall");
     }
     removePlaneMesh(plane) {
@@ -316,12 +334,15 @@ export class XREnvironment {
     }
     // Safe to call repeatedly: only planes not yet processed are changed, so
     // planes that arrive late don't rebuild the portal.
-    processPlanes(planes) {
+    processPlanes(planes, facingRay) {
+        if (this.choosingWall) {
+            return;
+        }
         const camera = this.scene.activeCamera;
         if (!camera) {
             return;
         }
-        const forwardRay = camera.getForwardRay();
+        const forwardRay = facingRay ?? camera.getForwardRay();
         const newPlanes = planes.filter((plane) => !plane.processed && plane.mesh);
         newPlanes.forEach((plane) => {
             plane.facingPlane = this.findPlaneWithRay(plane, forwardRay);
@@ -345,18 +366,27 @@ export class XREnvironment {
         this.removeAnyPlanBehindFoundPlane(this.foundPlane, planes, camera);
     }
     alignToWall(wall, camera) {
-        const normal = Vector3.TransformNormal(Vector3.Up(), wall.transformationMatrix);
+        const matrix = this.wallAlignment
+            ? wall.transformationMatrix.multiply(this.wallAlignment.getWorldMatrix())
+            : wall.transformationMatrix;
+        const normal = Vector3.TransformNormal(Vector3.Up(), matrix);
         normal.y = 0;
         normal.normalize();
+        wall.mesh.computeWorldMatrix(true);
         const toWall = wall.mesh
             .getAbsolutePosition()
             .subtract(camera.globalPosition);
         const towardWall = Vector3.Dot(normal, toWall) < 0 ? normal.negate() : normal;
-        const alignment = new TransformNode("wallAlignment", this.scene);
-        alignment.rotation.y = -Math.atan2(towardWall.x, towardWall.z);
+        this.turnWorld(-Math.atan2(towardWall.x, towardWall.z), camera);
+    }
+    turnWorld(byAngle, camera) {
+        if (!this.wallAlignment) {
+            this.wallAlignment = new TransformNode("wallAlignment", this.scene);
+            camera.parent = this.wallAlignment;
+        }
+        const alignment = this.wallAlignment;
+        alignment.rotation.y += byAngle;
         alignment.computeWorldMatrix(true);
-        this.wallAlignment = alignment;
-        camera.parent = alignment;
         camera.computeWorldMatrix();
         this.planes.forEach((plane) => {
             if (plane.mesh) {
@@ -422,6 +452,8 @@ export class XREnvironment {
         }
         this.lastCheckTime = 0;
         this.roomCaptureTried = false;
+        this.choosingWall = false;
+        this.wallLocked = false;
         this.hideMessage();
         this.portal?.dispose();
         this.portal = null;
@@ -443,7 +475,7 @@ export class XREnvironment {
             this.processFoundPlane(polygonMesh, plane);
         }
         else {
-            if (plane.facingPlane || this.isFurnitureAtPortal(plane)) {
+            if (plane.facingPlane || this.isFurnitureAtWall(plane, this.foundPlane)) {
                 // hide any walls behind the portal, and furniture right in front of it
                 const material = new StandardMaterial("hidden", this.scene);
                 material.alpha = 0.0;
@@ -458,16 +490,17 @@ export class XREnvironment {
             }
         }
     }
-    isFurnitureAtPortal(plane) {
+    // The wall must already face +Z.
+    isFurnitureAtWall(plane, wall) {
         const label = plane.xrPlane.semanticLabel ?? "";
-        if (NOT_FURNITURE.includes(label) || !this.foundPlane?.mesh)
+        if (NOT_FURNITURE.includes(label) || !wall?.mesh)
             return false;
-        this.foundPlane.mesh.computeWorldMatrix(true);
+        wall.mesh.computeWorldMatrix(true);
         plane.mesh.computeWorldMatrix(true);
-        const wallZ = this.foundPlane.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
+        const wallZ = wall.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
         const { maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
         const gap = wallZ - maximumWorld.z;
-        log.debug("Furniture", label, "gap to portal wall", gap.toFixed(2));
+        log.debug("Furniture", label, "gap to wall", gap.toFixed(2));
         return gap < PORTAL_FURNITURE_GAP;
     }
     findClosestPlane(planes, camera) {
@@ -518,26 +551,81 @@ export class XREnvironment {
         this.openPortalLater?.(start);
         this.openPortalLater = null;
     }
-    getFurniture() {
-        const furniture = [];
+    // The wall straight ahead of the player, if any. Reads only.
+    getFacedWall() {
+        const camera = this.scene.activeCamera;
+        if (!camera)
+            return null;
+        const walls = new Map();
         this.planes.forEach((plane) => {
+            if (plane.mesh && this.isWall(plane))
+                walls.set(plane.mesh, plane);
+        });
+        const picked = this.scene.pickWithRay(camera.getForwardRay(100, undefined, camera.globalPosition), (mesh) => walls.has(mesh));
+        return picked?.hit ? walls.get(picked.pickedMesh) ?? null : null;
+    }
+    // Turns the world so this wall faces +Z, without choosing it.
+    previewWall(wall) {
+        const camera = this.scene.activeCamera;
+        if (camera)
+            this.alignToWall(wall, camera);
+    }
+    // Turns the world so the player looks along +Z, for showing text before any wall.
+    faceHead() {
+        const camera = this.scene.activeCamera;
+        if (!camera)
+            return;
+        const { x, z } = camera.getForwardRay().direction;
+        this.turnWorld(-Math.atan2(x, z), camera);
+    }
+    getWallPlanes() {
+        return this.planes.filter((plane) => plane.mesh && this.isWall(plane));
+    }
+    // The furniture that paths and obstacles keep clear of when this wall is the portal. The wall
+    // must already face +Z. Upright surfaces have no top to fly over, so they don't count.
+    // Nor does furniture entirely beside the wall.
+    getPathFurniturePlanes(wall) {
+        return this.planes.filter((plane) => {
             const label = plane.xrPlane.semanticLabel ?? "";
             if (!plane.mesh || NOT_FURNITURE.includes(label))
-                return;
+                return false;
             plane.mesh.computeWorldMatrix(true);
             const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
-            // Upright surfaces, like the side of a cupboard, have no top to fly over.
             if (maximumWorld.y - minimumWorld.y > MAX_SURFACE_THICKNESS)
-                return;
-            furniture.push({
+                return false;
+            if (!wall?.mesh)
+                return true;
+            wall.mesh.computeWorldMatrix(true);
+            const wallZ = wall.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
+            return wallZ - minimumWorld.z >= PORTAL_FURNITURE_GAP;
+        });
+    }
+    // Chooses this wall, then carries on as if it had been found normally. The ray goes
+    // through the wall, as the player may be looking elsewhere while aiming the pistol.
+    lockWall(wall) {
+        const camera = this.scene.activeCamera;
+        if (!camera)
+            return;
+        this.previewWall(wall);
+        this.choosingWall = false;
+        this.wallLocked = true;
+        this.foundPlane = wall;
+        this.hideMessage();
+        const center = wall.mesh.getBoundingInfo().boundingBox.centerWorld;
+        const head = camera.globalPosition;
+        this.processPlanes(this.planes, new Ray(head.clone(), center.subtract(head).normalize()));
+    }
+    getFurniture() {
+        return this.getPathFurniturePlanes(this.foundPlane).map((plane) => {
+            const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
+            return {
                 minX: minimumWorld.x,
                 maxX: maximumWorld.x,
                 minZ: minimumWorld.z,
                 maxZ: maximumWorld.z,
                 topY: maximumWorld.y,
-            });
+            };
         });
-        return furniture;
     }
     // Walls and ceilings other than the portal wall. Normals point into the room.
     getRoomSurfaces(head) {
@@ -628,10 +716,11 @@ export class XREnvironment {
         this.setupMovement(featureManager);
         this.setupPlaneDetection(featureManager);
     }
-    async enterVR() {
+    async enterVR(options = {}) {
         if (!this.xrHelper) {
             throw new Error("XR is not ready yet");
         }
+        this.choosingWall = options.chooseWall === true;
         await this.xrHelper.baseExperience.enterXRAsync("immersive-ar", this.spaceType);
         log.debug("entered VR");
         this.startWallSearch();

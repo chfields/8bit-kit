@@ -1,6 +1,6 @@
 {
   "name": "8bit-kit",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Shared code for 8-bit WebXR arcade games built with BabylonJS",
   "license": "MIT",
   "type": "module",
