@@ -203,7 +203,8 @@ export class Portal {
             height: EDGE_THICKNESS,
             depth: EDGE_THICKNESS,
         }, this.scene);
-        box.renderingGroupId = 0;
+        // After the room's surfaces in group 0, because they have no colour to cover it with.
+        box.renderingGroupId = 1;
         box.material = material;
         box.position = start.add(end).scale(0.5);
         // Local X runs along the edge and local Z along the wall's normal, so every
@@ -222,11 +223,20 @@ export class Portal {
         return neonMaterial;
     }
     createGlowLayer() {
-        return new GlowLayer("glow", this.scene, {
+        const glowLayer = new GlowLayer("glow", this.scene, {
             mainTextureSamples: 4,
             mainTextureFixedSize: 256,
             blurKernelSize: 100,
         });
+        // Without these in its own pass, the glow shows through real surfaces.
+        this.scene.meshes
+            .filter((mesh) => mesh.metadata?.solid)
+            .forEach((mesh) => glowLayer.addIncludedOnlyMesh(mesh));
+        return glowLayer;
+    }
+    // For a solid surface the headset finds after the portal has opened.
+    blockGlow(mesh) {
+        this.glowLayer?.addIncludedOnlyMesh(mesh);
     }
     createParticleSystem(box, length) {
         const system = createPortalSmoke(this.scene);

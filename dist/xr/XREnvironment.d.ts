@@ -60,6 +60,7 @@ export declare class XREnvironment {
     private hideMessage;
     private resetSession;
     private processSinglePlane;
+    private isFurnitureAtPortal;
     private findClosestPlane;
     private findClosestFacingPlane;
     private processFoundPlane;

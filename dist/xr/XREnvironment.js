@@ -19,6 +19,8 @@ const PLANE_SCAN_TIMEOUT_MS = 5000;
 const WALL_SEARCH_INTERVAL_MS = 500;
 const NOT_FURNITURE = ["wall", "floor", "ceiling"];
 const MAX_SURFACE_THICKNESS = 0.2;
+// Furniture this close to the portal's wall doesn't cut into the portal, which draws over it.
+const PORTAL_FURNITURE_GAP = 0.5;
 export class XREnvironment {
     constructor(scene) {
         Object.defineProperty(this, "scene", {
@@ -441,16 +443,32 @@ export class XREnvironment {
             this.processFoundPlane(polygonMesh, plane);
         }
         else {
-            if (plane.facingPlane) {
-                // hide any walls behind the portal
+            if (plane.facingPlane || this.isFurnitureAtPortal(plane)) {
+                // hide any walls behind the portal, and furniture right in front of it
                 const material = new StandardMaterial("hidden", this.scene);
                 material.alpha = 0.0;
                 polygonMesh.material = material;
             }
             else {
-                new OccluderPlane(polygonMesh, this.scene);
+                const solid = !NOT_FURNITURE.includes(plane.xrPlane.semanticLabel ?? "");
+                new OccluderPlane(polygonMesh, this.scene, solid);
+                if (solid) {
+                    this.portal?.blockGlow(polygonMesh);
+                }
             }
         }
+    }
+    isFurnitureAtPortal(plane) {
+        const label = plane.xrPlane.semanticLabel ?? "";
+        if (NOT_FURNITURE.includes(label) || !this.foundPlane?.mesh)
+            return false;
+        this.foundPlane.mesh.computeWorldMatrix(true);
+        plane.mesh.computeWorldMatrix(true);
+        const wallZ = this.foundPlane.mesh.getBoundingInfo().boundingBox.minimumWorld.z;
+        const { maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
+        const gap = wallZ - maximumWorld.z;
+        log.debug("Furniture", label, "gap to portal wall", gap.toFixed(2));
+        return gap < PORTAL_FURNITURE_GAP;
     }
     findClosestPlane(planes, camera) {
         const closestPlane = planes.reduce((prev, curr) => {
