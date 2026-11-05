@@ -33,6 +33,8 @@ describe("TestRoom's aimed buttons", () => {
     ({
       getFacedWall: () => wall,
       previewWall: () => {},
+      previewGaps: () => {},
+      endGapPreview: () => {},
       faceHead: () => {},
       getWallPlanes: () => [],
       getPathFurniturePlanes: () => [],

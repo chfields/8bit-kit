@@ -74,6 +74,8 @@ export class XREnvironment {
   // Walls behind the portal wall, and the panels covering the gap they leave.
   private gapWalls: Extent[] = [];
   private gapPanelMeshes: Mesh[] = [];
+  private gapPreviewKey: Nullable<string> = null;
+  private previewMaterial: Nullable<StandardMaterial> = null;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -258,6 +260,59 @@ export class XREnvironment {
     this.placeGapPanels(wallMin, wallMax);
   }
 
+  // Shows which surfaces would hide what's beyond the room if this wall became the portal, by
+  // the same rules as the game, while removing nothing: the player can still choose another
+  // wall. The glowing wall stays solid here, as its glow covers it. Safe to call often.
+  public previewGaps(wall: any) {
+    const key = `${wall.id}:${this.planes.length}`;
+    if (key === this.gapPreviewKey) return;
+    this.gapPreviewKey = key;
+    this.previewMaterial ??= this.createPreviewMaterial();
+    wall.mesh.computeWorldMatrix(true);
+    const { minimumWorld: wallMin, maximumWorld: wallMax } = wall.mesh.getBoundingInfo()
+      .boundingBox as BoundingBox;
+    this.gapWalls = [];
+    this.planes.forEach((plane) => {
+      if (!plane.mesh) return;
+      plane.mesh.computeWorldMatrix(true);
+      const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
+        .boundingBox as BoundingBox;
+      const behind =
+        plane !== wall &&
+        isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z);
+      if (behind && this.isWall(plane)) {
+        this.gapWalls.push({
+          minX: minimumWorld.x,
+          maxX: maximumWorld.x,
+          minY: minimumWorld.y,
+          maxY: maximumWorld.y,
+        });
+      }
+      const hidden = behind || (plane !== wall && this.isFurnitureAtWall(plane, wall));
+      plane.mesh.material = hidden ? null : this.previewMaterial;
+    });
+    this.placeGapPanels(wallMin, wallMax);
+  }
+
+  public endGapPreview() {
+    this.gapPreviewKey = null;
+    this.planes.forEach((plane) => {
+      if (plane.mesh) plane.mesh.material = null;
+    });
+    this.previewMaterial?.dispose();
+    this.previewMaterial = null;
+    this.gapWalls = [];
+    this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
+    this.gapPanelMeshes = [];
+  }
+
+  private createPreviewMaterial(): StandardMaterial {
+    const material = new StandardMaterial("roomPreviewOccluder", this.scene);
+    material.disableLighting = true;
+    material.forceDepthWrite = true;
+    return material;
+  }
+
   private placeGapPanels(wallMin: Vector3, wallMax: Vector3) {
     this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
     this.gapPanelMeshes = gapPanels(
@@ -423,9 +478,7 @@ export class XREnvironment {
     this.lastCheckTime = 0;
     this.roomCaptureTried = false;
     this.choosingWall = false;
-    this.gapWalls = [];
-    this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
-    this.gapPanelMeshes = [];
+    this.endGapPreview();
     this.hideMessage();
     this.portal?.dispose();
     this.portal = null;

@@ -48,6 +48,11 @@ const SURFACE_ALPHA = 0.2;
 // local-floor puts the floor here, for when no floor has been scanned.
 const DEFAULT_FLOOR_Y = 0;
 const MIN_BLOCK_HEIGHT = 0.01;
+// Shows wherever the game's stars would show. Dim, as a poor scan can fill much of the view.
+const SPACE_COLOR = new Color3(0.45, 0, 0);
+const SPACE_BOX_SIZE = 700;
+// Translucent surfaces lie exactly on the surfaces that hide the space, so they draw first.
+const BEFORE_OCCLUDERS = 0;
 
 export type TestRoomOptions = {
   xrEnvironment: XREnvironment;
@@ -72,6 +77,7 @@ export class TestRoom {
   private wall: any = null;
   private glow: Nullable<Mesh> = null;
   private glowMaterial: StandardMaterial;
+  private space: Nullable<Mesh> = null;
   private surfaceMaterial: StandardMaterial;
   private surfaces = new Map<any, { fill: Mesh; outline: LinesMesh; floorY?: number }>();
   private texts: VoxelText[] = [];
@@ -107,6 +113,7 @@ export class TestRoom {
       this.showWall(faced);
     } else if (this.wall) {
       this.updateWarnings();
+      this.options.xrEnvironment.previewGaps(this.wall);
     } else if (!this.noWallShown) {
       this.showNoWall();
     }
@@ -188,6 +195,7 @@ export class TestRoom {
   private finishSurface(plane: any, fill: Mesh, outline: LinesMesh) {
     fill.parent = plane.mesh;
     fill.material = this.surfaceMaterial;
+    fill.alphaIndex = BEFORE_OCCLUDERS;
     fill.visibility = 1;
     fill.isPickable = false;
     fill.checkCollisions = false;
@@ -215,6 +223,8 @@ export class TestRoom {
     this.wall = wall;
     this.noWallShown = false;
     this.options.xrEnvironment.previewWall(wall);
+    this.options.xrEnvironment.previewGaps(wall);
+    this.showSpace();
     this.showGlow(wall);
     this.clearTextAndButtons();
 
@@ -238,6 +248,25 @@ export class TestRoom {
     this.updateWarnings();
   }
 
+  // Drawn like the game's stars: after the room's surfaces, and only where they leave a gap.
+  private showSpace() {
+    if (this.space) return;
+    const box = MeshBuilder.CreateBox(
+      "testRoomSpace",
+      { size: SPACE_BOX_SIZE, sideOrientation: Mesh.DOUBLESIDE },
+      this.scene
+    );
+    const material = new StandardMaterial("testRoomSpace", this.scene);
+    material.disableLighting = true;
+    material.emissiveColor = SPACE_COLOR;
+    material.diffuseColor = Color3.Black();
+    material.specularColor = Color3.Black();
+    box.material = material;
+    box.renderingGroupId = 1;
+    box.isPickable = false;
+    this.space = box;
+  }
+
   private showGlow(wall: any) {
     this.glow?.dispose();
     const glow = wall.mesh.clone("testRoomGlow", null, true) as Mesh;
@@ -246,6 +275,7 @@ export class TestRoom {
     glow.rotationQuaternion = Quaternion.Identity();
     glow.scaling.setAll(1);
     glow.material = this.glowMaterial;
+    glow.alphaIndex = BEFORE_OCCLUDERS;
     glow.visibility = 1;
     glow.isPickable = false;
     glow.checkCollisions = false;
@@ -391,5 +421,8 @@ export class TestRoom {
     this.surfaces.forEach((surface) => this.disposeSurface(surface));
     this.surfaces.clear();
     this.surfaceMaterial.dispose();
+    this.space?.dispose(false, true);
+    this.space = null;
+    this.options.xrEnvironment.endGapPreview();
   }
 }
