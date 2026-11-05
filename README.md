@@ -87,11 +87,23 @@ and CHANGE lets it go again. While a wall is picked, the room is shown as it wil
 with red wherever space would show through. A game can do the same with
 `xrEnvironment.previewGaps(wall)` and `xrEnvironment.endGapPreview()`.
 
+RESCAN SPACE, at the top left of the faced wall, opens the headset's own room setup through
+`xrEnvironment.rescanRoom()`, which resolves to whether it started. Afterwards the player picks
+again. If the headset refuses, the Test Room says so.
+
+Standing where the headset has no floor, the Test Room says the room isn't scanned and offers
+only RESCAN SPACE and BACK. Start Game opens the room setup instead. A wall end that meets no
+other wall means the scan is missing one, and the Test Room warns about it.
+
 ## Room surfaces
 
 `xr/XREnvironment` follows the headset's room data for the whole session. A surface the
 headset removes goes, one it moves follows, and one whose outline changes is built again.
-The headset replaces every surface each time a session starts. The portal's wall never
+The headset replaces every surface each time a session starts. It reports every room it has scanned, so
+the player's room is the floor under their head. Only that room's walls can be chosen, and only
+its surfaces and furniture are used for rifts, flight paths and the floor height. Other rooms'
+surfaces still hide the stars. `xrEnvironment.playerRoomState()` says whether the player is in
+a scanned room. The portal's wall never
 changes once it's found, and a later report of that same wall is ignored.
 
 Surfaces further back than the portal wall, such as an alcove or the next room, are removed,
