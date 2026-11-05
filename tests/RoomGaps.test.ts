@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { gapPanels, isBehindWall } from "../src/xr/RoomGaps";
+import {
+  DEFAULT_WALL_OVERLAP,
+  gapPanels,
+  isBehindWall,
+  stretchWall,
+  wallOverlap,
+} from "../src/xr/RoomGaps";
 
 const WALL_Z = 2;
 const wall = { minX: -1, maxX: 1, minY: 0, maxY: 2.4 };
@@ -69,5 +75,55 @@ describe("gapPanels", () => {
     expect(gapPanels(wall, [{ minX: -2, maxX: -1, minY: 0.5, maxY: 1.5 }])).toEqual([
       { minX: -2, maxX: -1, minY: 0, maxY: 2.4 },
     ]);
+  });
+});
+
+describe("wallOverlap", () => {
+  test("reads centimetres from the URL, in metres", () => {
+    expect(wallOverlap("?overlap=5")).toBeCloseTo(0.05);
+    expect(wallOverlap("?stage=9&overlap=12.5")).toBeCloseTo(0.125);
+  });
+
+  test("zero turns it off", () => {
+    expect(wallOverlap("?overlap=0")).toBe(0);
+  });
+
+  test("anything else uses the default", () => {
+    for (const search of ["", "?overlap=", "?overlap=lots", "?overlap=-3", "?overlap=500"]) {
+      expect(wallOverlap(search)).toBe(DEFAULT_WALL_OVERLAP);
+    }
+  });
+});
+
+describe("stretchWall", () => {
+  // A flat wall in its own x and z, 1 cm thick along y. World z is its local x.
+  const corners = [-1, 0, -2, 1, 0, -2, 1, 0, 2, -1, 0, 2];
+  const worldZ = (x: number) => x;
+
+  test("every corner moves outwards along both of the wall's axes", () => {
+    expect(stretchWall(corners, 0.1, worldZ, 100)).toEqual([
+      -1.1, 0, -2.1, 1.1, 0, -2.1, 1.1, 0, 2.1, -1.1, 0, 2.1,
+    ]);
+  });
+
+  test("thickness doesn't change", () => {
+    const thick = [-1, 0, -2, 1, 0.01, 2];
+    const stretched = stretchWall(thick, 0.1, worldZ, 100);
+    expect([stretched[1], stretched[4]]).toEqual([0, 0.01]);
+  });
+
+  test("it never crosses the portal's plane, but still stretches along the other axis", () => {
+    // The wall's far end stops at the plane, so it can't show through the portal.
+    expect(stretchWall(corners, 0.1, worldZ, 1)).toEqual([
+      -1.1, 0, -2.1, 1, 0, -2.1, 1, 0, 2.1, -1.1, 0, 2.1,
+    ]);
+  });
+
+  test("a stretch moving away from the plane is allowed even from beyond it", () => {
+    expect(stretchWall(corners, 0.1, worldZ, -5)[0]).toBe(-1.1);
+  });
+
+  test("no overlap leaves the wall alone", () => {
+    expect(stretchWall(corners, 0, worldZ, 100)).toEqual(corners);
   });
 });

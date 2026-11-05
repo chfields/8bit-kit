@@ -4,6 +4,7 @@ import { Ray } from "@babylonjs/core/Culling/ray";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { PolygonMeshBuilder } from "@babylonjs/core/Meshes/polygonMesh";
@@ -18,7 +19,7 @@ import { Nullable } from "@babylonjs/core/types";
 import { XRInputControllers } from "./XRInputControllers";
 import earcut from "earcut";
 import type { XRRange } from "./XRRange";
-import { Extent, gapPanels, isBehindWall } from "./RoomGaps";
+import { Extent, gapPanels, isBehindWall, stretchWall, wallOverlap } from "./RoomGaps";
 import { OccluderPlane } from "./OccluderPlane";
 import { RoomSurface } from "./RoomExits";
 import { Portal, PortalStart } from "./Portal";
@@ -76,6 +77,7 @@ export class XREnvironment {
   private gapPanelMeshes: Mesh[] = [];
   private gapPreviewKey: Nullable<string> = null;
   private previewMaterial: Nullable<StandardMaterial> = null;
+  private overlap = wallOverlap(window.location.search);
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -290,6 +292,10 @@ export class XREnvironment {
       }
       const hidden = behind || (plane !== wall && this.isFurnitureAtWall(plane, wall));
       plane.mesh.material = hidden ? null : this.previewMaterial;
+      this.restoreWallSize(plane);
+      if (!hidden && plane !== wall && this.isWall(plane)) {
+        this.stretchWallPast(plane, wallMin.z);
+      }
     });
     this.placeGapPanels(wallMin, wallMax);
   }
@@ -297,13 +303,54 @@ export class XREnvironment {
   public endGapPreview() {
     this.gapPreviewKey = null;
     this.planes.forEach((plane) => {
-      if (plane.mesh) plane.mesh.material = null;
+      if (!plane.mesh) return;
+      plane.mesh.material = null;
+      this.restoreWallSize(plane);
     });
     this.previewMaterial?.dispose();
     this.previewMaterial = null;
     this.gapWalls = [];
     this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
     this.gapPanelMeshes = [];
+  }
+
+  // Bounds stay as scanned, so rifts and paths still use the wall's real size.
+  private stretchWallPast(plane: any, limitZ: number) {
+    if (this.overlap === 0) return;
+    const mesh = plane.mesh as Mesh;
+    const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+    if (!positions) return;
+    // Test Room's surfaces are copies that keep showing the wall's scanned size.
+    mesh.makeGeometryUnique();
+    plane.scannedPositions ??= Array.from(positions);
+    const scannedBounds = mesh.getBoundingInfo();
+    mesh.computeWorldMatrix(true);
+    const world = mesh.getWorldMatrix();
+    const point = new Vector3();
+    mesh.setVerticesData(
+      VertexBuffer.PositionKind,
+      stretchWall(
+        plane.scannedPositions,
+        this.overlap,
+        (x, y, z) => {
+          point.set(x, y, z);
+          return Vector3.TransformCoordinates(point, world).z;
+        },
+        limitZ
+      )
+    );
+    mesh.setBoundingInfo(scannedBounds);
+    // Its bounds are smaller than the stretched wall, so it must never be culled by them.
+    mesh.alwaysSelectAsActiveMesh = true;
+  }
+
+  private restoreWallSize(plane: any) {
+    if (!plane.scannedPositions) return;
+    const scannedBounds = plane.mesh.getBoundingInfo();
+    plane.mesh.setVerticesData(VertexBuffer.PositionKind, plane.scannedPositions);
+    plane.mesh.setBoundingInfo(scannedBounds);
+    plane.mesh.alwaysSelectAsActiveMesh = false;
+    plane.scannedPositions = null;
   }
 
   private createPreviewMaterial(): StandardMaterial {
@@ -508,6 +555,11 @@ export class XREnvironment {
       } else {
         const solid = !NOT_FURNITURE.includes(plane.xrPlane.semanticLabel ?? "");
         new OccluderPlane(polygonMesh, this.scene, solid);
+        if (this.isWall(plane) && this.foundPlane?.mesh) {
+          const { minimumWorld } = this.foundPlane.mesh.getBoundingInfo()
+            .boundingBox as BoundingBox;
+          this.stretchWallPast(plane, minimumWorld.z);
+        }
         if (solid) {
           this.portal?.blockGlow(polygonMesh);
         }

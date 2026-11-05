@@ -36,3 +36,41 @@ export function gapPanels(wall: Extent, behind: Extent[]): Extent[] {
   }
   return panels;
 }
+
+// Scans of neighbouring surfaces often stop short of each other, leaving slits that would show
+// the stars. So walls reach a little past their edges. Set in centimetres with ?overlap=.
+export const DEFAULT_WALL_OVERLAP = 0.08;
+const MAX_OVERLAP_CM = 50;
+
+export function wallOverlap(search: string): number {
+  const text = new URLSearchParams(search).get("overlap");
+  const centimetres = text === null || text === "" ? NaN : Number(text);
+  if (!(centimetres >= 0 && centimetres <= MAX_OVERLAP_CM)) return DEFAULT_WALL_OVERLAP;
+  return centimetres / 100;
+}
+
+// Moves a wall's corners outwards along its own x and z. Each move is skipped if it would carry
+// a corner past the portal's plane, as that part would show through the portal.
+export function stretchWall(
+  positions: number[],
+  margin: number,
+  worldZAt: (x: number, y: number, z: number) => number,
+  limitZ: number
+): number[] {
+  const stretched = [...positions];
+  const middle = (axis: number) => {
+    const values = positions.filter((_, i) => i % 3 === axis);
+    return (Math.min(...values) + Math.max(...values)) / 2;
+  };
+  const centers = [middle(0), 0, middle(2)];
+  for (let i = 0; i < stretched.length; i += 3) {
+    for (const axis of [0, 2]) {
+      const before = stretched[i + axis];
+      const beforeZ = worldZAt(stretched[i], stretched[i + 1], stretched[i + 2]);
+      stretched[i + axis] = before + Math.sign(before - centers[axis]) * margin;
+      const afterZ = worldZAt(stretched[i], stretched[i + 1], stretched[i + 2]);
+      if (afterZ > limitZ && afterZ > beforeZ) stretched[i + axis] = before;
+    }
+  }
+  return stretched;
+}
