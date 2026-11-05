@@ -71,6 +71,7 @@ describe("TestRoom's aimed buttons", () => {
       getAimRay: () => aim,
       onStart: () => {},
       onBack: () => {},
+      showGaps: false,
     });
     scene.render();
     // Now the buttons exist, a frame places their hit areas.
@@ -84,6 +85,28 @@ describe("TestRoom's aimed buttons", () => {
   });
 
   const button = (name: string) => scene.getMeshByName(name);
+
+  // The same room, with PICK and the red gaps, as ?gaps gives.
+  const withGaps = () => {
+    room.dispose();
+    room = new TestRoom({
+      xrEnvironment: environment(),
+      scene,
+      getAimRay: () => aim,
+      onStart: () => {},
+      onBack: () => {},
+      showGaps: true,
+    });
+    scene.render();
+    scene.render();
+  };
+
+  test("PICK only shows when the gaps are asked for", () => {
+    expect(button("testRoomPickButton")).toBeNull();
+    expect(button("testRoomStartButton")).not.toBeNull();
+    withGaps();
+    expect(button("testRoomPickButton")).not.toBeNull();
+  });
 
   test("pressAimed presses the button the ray is on", () => {
     expect(room.pressAimed()).toBe(true);
@@ -160,11 +183,13 @@ describe("TestRoom's aimed buttons", () => {
   });
 
   test("RESCAN SPACE stays once a wall is picked", () => {
+    withGaps();
     (room as any).pick();
     expect(button("testRoomRescanButton")).not.toBeNull();
   });
 
   test("RESCAN SPACE asks the headset to scan the room, then the buttons work again", async () => {
+    withGaps();
     (room as any).pick();
     (room as any).finishing = true;
     await (room as any).rescan();

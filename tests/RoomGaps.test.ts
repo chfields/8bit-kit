@@ -4,6 +4,7 @@ import {
   gapPanels,
   isBehindWall,
   openWallEnds,
+  showGapsFrom,
   Point2,
   stretchWall,
   wallOverlap,
@@ -171,5 +172,19 @@ describe("openWallEnds", () => {
   test("a wall meeting the middle of another counts as meeting", () => {
     expect(openWallEnds([...box, wall(2, 0, 2, 1.5)])).toBe(1);
     expect(openWallEnds([...box, wall(2, 0, 2, 3)])).toBe(0);
+  });
+});
+
+describe("showGapsFrom", () => {
+  test("is on with ?gaps, alone or among others", () => {
+    expect(showGapsFrom("?gaps")).toBe(true);
+    expect(showGapsFrom("?overlap=5&gaps")).toBe(true);
+    expect(showGapsFrom("?gaps=1")).toBe(true);
+  });
+
+  test("is off without it", () => {
+    expect(showGapsFrom("")).toBe(false);
+    expect(showGapsFrom("?overlap=5")).toBe(false);
+    expect(showGapsFrom("?gapsy")).toBe(false);
   });
 });

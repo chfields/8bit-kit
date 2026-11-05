@@ -82,7 +82,8 @@ That presses the button `getAimRay`'s ray is on, and returns whether it pressed 
 nothing once the room is finishing or disposed. `testRoom.aimedDistance()` gives the distance
 to that button, or null, so an aim line can end there.
 
-Once a wall is faced, PICK holds it, so the player can turn round without the choice moving,
+With `?gaps` in the URL, in any build, or `showGaps: true` in the options, the Test Room also
+checks for gaps. Once a wall is faced, PICK holds it, so the player can turn round without the choice moving,
 and CHANGE lets it go again. While a wall is picked, the room is shown as it will be in play,
 with red wherever space would show through. A game can do the same with
 `xrEnvironment.previewGaps(wall)` and `xrEnvironment.endGapPreview()`.

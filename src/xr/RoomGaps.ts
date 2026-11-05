@@ -103,3 +103,9 @@ export function openWallEnds(walls: [Point2, Point2][]): number {
   });
   return open;
 }
+
+// Whether the Test Room offers PICK and shows the red gaps: only with ?gaps in the URL, as
+// they're for finding gaps in the game's cover, which a player can't fix.
+export function showGapsFrom(search: string): boolean {
+  return new URLSearchParams(search).has("gaps");
+}

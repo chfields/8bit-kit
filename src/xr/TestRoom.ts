@@ -14,6 +14,7 @@ import { GameAssetManager } from "../assets/GameAssetManager";
 import { VoxelText, voxelTextHeight, voxelTextWidth } from "../effects/VoxelText";
 import { VoxelButton } from "../screen/VoxelButton";
 import { RoomLimits, roomWarnings } from "./RoomCheck";
+import { showGapsFrom } from "./RoomGaps";
 import { XREnvironment } from "./XREnvironment";
 
 // A game adds these to PlayerBullet.configure's destroys, so shots reach the buttons.
@@ -77,6 +78,8 @@ export type TestRoomOptions = {
   scene: Scene;
   getAimRay: () => Nullable<Ray>;
   limits?: RoomLimits;
+  // PICK, CHANGE and the red gaps. Defaults to whether ?gaps is in the URL.
+  showGaps?: boolean;
   // Runs just before the wall locks, which fires the size observers. The game should
   // set itself up so that they start its opening.
   onStart: () => void;
@@ -94,6 +97,7 @@ export class TestRoom {
   private finishing = false;
   // The player has picked this wall to look for gaps, so turning doesn't change it.
   private picked = false;
+  private showGaps: boolean;
   private wall: any = null;
   private glow: Nullable<Mesh> = null;
   private glowMaterial: StandardMaterial;
@@ -112,6 +116,7 @@ export class TestRoom {
 
   constructor(options: TestRoomOptions) {
     this.options = options;
+    this.showGaps = options.showGaps ?? showGapsFrom(window.location.search);
     this.scene = options.scene;
     this.glowMaterial = new StandardMaterial("testRoomGlow", this.scene);
     this.glowMaterial.disableLighting = true;
@@ -310,9 +315,9 @@ export class TestRoom {
     this.addButton("START", "testRoomStart", new Vector3(x - BUTTON_SPACING, buttonY, z), START_COLOR, () => this.start());
     this.addButton("BACK", "testRoomBack", new Vector3(x + BUTTON_SPACING, buttonY, z), BACK_COLOR, () => this.back());
     const pickCenter = new Vector3(x, buttonY - PICK_BELOW_BUTTONS, z);
-    if (this.picked) {
+    if (this.showGaps && this.picked) {
       this.addButton("CHANGE", "testRoomChange", pickCenter, PICK_COLOR, () => this.change());
-    } else {
+    } else if (this.showGaps) {
       this.addButton("PICK", "testRoomPick", pickCenter, PICK_COLOR, () => this.pick());
     }
     this.addButton(RESCAN_LABEL, "testRoomRescan", this.rescanCenter(z), RESCAN_COLOR, () => this.rescan(), RESCAN_CUBE_SIZE);
