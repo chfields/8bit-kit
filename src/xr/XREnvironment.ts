@@ -18,6 +18,7 @@ import { Nullable } from "@babylonjs/core/types";
 import { XRInputControllers } from "./XRInputControllers";
 import earcut from "earcut";
 import type { XRRange } from "./XRRange";
+import { Extent, gapPanels, isBehindWall } from "./RoomGaps";
 import { OccluderPlane } from "./OccluderPlane";
 import { RoomSurface } from "./RoomExits";
 import { Portal, PortalStart } from "./Portal";
@@ -70,9 +71,9 @@ export class XREnvironment {
   private openPortalLater: Nullable<(start: PortalStart) => void> = null;
   // Walls aren't picked automatically while the player chooses one in Test Room.
   private choosingWall = false;
-  // The player chose the wall and may have looked away since, including when planes arrive
-  // late. The world is already turned to that wall, so left is along -X, not the head's left.
-  private wallLocked = false;
+  // Walls behind the portal wall, and the panels covering the gap they leave.
+  private gapWalls: Extent[] = [];
+  private gapPanelMeshes: Mesh[] = [];
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -219,37 +220,6 @@ export class XREnvironment {
     return false;
   }
 
-  private findBasedOnCamera(
-    camera: Camera,
-    planes: any[],
-    ray: Ray,
-    findType: string = "wall"
-  ) {
-    // find all planes that are facing the camera
-    const matchingPlanes = planes.filter((plane) => {
-      return this.findPlaneWithRay(plane, ray, findType);
-    });
-
-
-    // find to the camera
-    const foundPlane = this.findClosestPlane(matchingPlanes, camera);
-
-    if (foundPlane) {
-      return foundPlane;
-    }
-    return null;
-  }
-
-  private findLeftWall(camera: Camera, planes: any[]) {
-    const ray = new Ray(
-      camera.globalPosition,
-      this.wallLocked
-        ? new Vector3(-1, 0, 0)
-        : camera.getDirection(new Vector3(-1, 0, 0))
-    );
-    return this.findBasedOnCamera(camera, planes, ray, "wall");
-  }
-
   private removePlaneMesh(plane: any) {
     if (plane.mesh) {
       plane.mesh.dispose(false, true);
@@ -257,41 +227,61 @@ export class XREnvironment {
     }
   }
 
+  // Walls behind the portal wall are removed, as they'd show through the portal, and panels
+  // cover the gap they leave beside it. Everything else stays: it's a real surface.
   private removeAnyPlanBehindFoundPlane(
     foundPlane: any,
     planes: any[],
     camera: Camera
   ) {
-    const foundPlaneBoundingBox = foundPlane.mesh.getBoundingInfo()
-      .boundingBox as BoundingBox;
-    const foundPlaneZMin = foundPlaneBoundingBox.minimumWorld.z;
-    const cameraZ = camera.globalPosition.z;
-    // Read up front because this loop can remove the left wall's mesh.
-    const leftWallX = this.findLeftWall(camera, planes)
-      ?.mesh.getAbsolutePosition().x;
-    for (let i = 0; i < planes.length; i++) {
-      const plane = planes[i];
-      if (plane.id === foundPlane.id) {
-        continue;
-      }
-      if (!plane.mesh) continue;
-      const planeBoundingBox = plane.mesh.getBoundingInfo()
+    const { minimumWorld: wallMin, maximumWorld: wallMax } =
+      foundPlane.mesh.getBoundingInfo().boundingBox as BoundingBox;
+    if (camera.globalPosition.z >= wallMin.z) return;
+    planes.forEach((plane) => {
+      if (plane.id === foundPlane.id || !plane.mesh) return;
+      const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
         .boundingBox as BoundingBox;
-      const planeZMin = planeBoundingBox.minimumWorld.z;
-      if (cameraZ < foundPlaneZMin) {
-        // items that are fully behind the found plane
-        if (planeZMin > foundPlaneZMin) {
-          this.removePlaneMesh(plane);
-        }
-        // items that are fully left of the left wall
-        if (
-          leftWallX !== undefined &&
-          planeBoundingBox.maximumWorld.x < leftWallX
-        ) {
-          this.removePlaneMesh(plane);
-        }
+      // The wall's far face, as surfaces are compared by their own far faces.
+      if (!isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z)) {
+        return;
       }
-    }
+      if (this.isWall(plane)) {
+        this.gapWalls.push({
+          minX: minimumWorld.x,
+          maxX: maximumWorld.x,
+          minY: minimumWorld.y,
+          maxY: maximumWorld.y,
+        });
+      }
+      this.removePlaneMesh(plane);
+    });
+    this.placeGapPanels(wallMin, wallMax);
+  }
+
+  private placeGapPanels(wallMin: Vector3, wallMax: Vector3) {
+    this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
+    this.gapPanelMeshes = gapPanels(
+      { minX: wallMin.x, maxX: wallMax.x, minY: wallMin.y, maxY: wallMax.y },
+      this.gapWalls
+    ).map((panel) => {
+      const mesh = MeshBuilder.CreatePlane(
+        "roomGapPanel",
+        {
+          width: panel.maxX - panel.minX,
+          height: panel.maxY - panel.minY,
+          sideOrientation: Mesh.DOUBLESIDE,
+        },
+        this.scene
+      );
+      mesh.position.set(
+        (panel.minX + panel.maxX) / 2,
+        (panel.minY + panel.maxY) / 2,
+        wallMin.z
+      );
+      mesh.computeWorldMatrix(true);
+      new OccluderPlane(mesh, this.scene);
+      return mesh;
+    });
   }
 
   private isWall(plane: any): boolean {
@@ -433,7 +423,9 @@ export class XREnvironment {
     this.lastCheckTime = 0;
     this.roomCaptureTried = false;
     this.choosingWall = false;
-    this.wallLocked = false;
+    this.gapWalls = [];
+    this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
+    this.gapPanelMeshes = [];
     this.hideMessage();
     this.portal?.dispose();
     this.portal = null;
@@ -607,7 +599,6 @@ export class XREnvironment {
     if (!camera) return;
     this.previewWall(wall);
     this.choosingWall = false;
-    this.wallLocked = true;
     this.foundPlane = wall;
     this.hideMessage();
     const center = wall.mesh.getBoundingInfo().boundingBox.centerWorld;
