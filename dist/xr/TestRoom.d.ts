@@ -9,6 +9,7 @@ export type TestRoomOptions = {
     scene: Scene;
     getAimRay: () => Nullable<Ray>;
     limits?: RoomLimits;
+    showGaps?: boolean;
     onStart: () => void;
     onBack: () => void;
 };
@@ -19,9 +20,12 @@ export declare class TestRoom {
     private lastCheck;
     private disposed;
     private finishing;
+    private picked;
+    private showGaps;
     private wall;
     private glow;
     private glowMaterial;
+    private space;
     private surfaceMaterial;
     private surfaces;
     private texts;
@@ -29,6 +33,8 @@ export declare class TestRoom {
     private warningsShown;
     private buttons;
     private noWallShown;
+    private rescanFailed;
+    private unscannedShown;
     private placement;
     constructor(options: TestRoomOptions);
     private tick;
@@ -42,8 +48,16 @@ export declare class TestRoom {
     private wallBox;
     private head;
     private showWall;
+    private pick;
+    private change;
+    private loseWall;
+    private placeTextAndButtons;
+    private rescanCenter;
+    private rescan;
+    private showSpace;
     private showGlow;
     private showNoWall;
+    private showUnscanned;
     private fittedCubeSize;
     private updateWarnings;
     private addButton;

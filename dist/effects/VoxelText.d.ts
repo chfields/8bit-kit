@@ -3,6 +3,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
 export declare function voxelTextWidth(text: string, cubeSize: number): number;
+export declare function voxelTextHeight(cubeSize: number): number;
 export declare class VoxelText {
     private scene;
     private node;

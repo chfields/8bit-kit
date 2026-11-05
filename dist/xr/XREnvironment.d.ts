@@ -13,6 +13,7 @@ export type Furniture = {
     maxZ: number;
     topY: number;
 };
+export type PlayerRoomState = "scanned" | "unscanned" | "unknown";
 export declare class XREnvironment {
     private static instance;
     private scene;
@@ -36,7 +37,11 @@ export declare class XREnvironment {
     private wallAlignment;
     private openPortalLater;
     private choosingWall;
-    private wallLocked;
+    private gapWalls;
+    private gapPanelMeshes;
+    private gapPreviewKey;
+    private previewMaterial;
+    private overlap;
     constructor(scene: Scene);
     hideEnterExitButton(): Promise<void>;
     enterExitObserver(observer: (exit: boolean) => void): Promise<void>;
@@ -45,12 +50,21 @@ export declare class XREnvironment {
     private addPlane;
     private planesScanning;
     private setupPlaneDetection;
+    private forgetPlane;
+    private followPlane;
+    private sameOutline;
+    private closePolygon;
+    private isPortalWallCopy;
     private createPolygonMesh;
     private findPlaneWithRay;
-    private findBasedOnCamera;
-    private findLeftWall;
     private removePlaneMesh;
     private removeAnyPlanBehindFoundPlane;
+    previewGaps(wall: any): void;
+    endGapPreview(): void;
+    private stretchWallPast;
+    private restoreWallSize;
+    private createPreviewMaterial;
+    private placeGapPanels;
     private isWall;
     private processPlanes;
     private alignToWall;
@@ -58,6 +72,7 @@ export declare class XREnvironment {
     private startWallSearch;
     private stopWallSearch;
     private searchForWall;
+    rescanRoom(): Promise<boolean>;
     private requestRoomCapture;
     private showMessage;
     private hideMessage;
@@ -77,6 +92,14 @@ export declare class XREnvironment {
     getFurniture(): Furniture[];
     getRoomSurfaces(head: Vector3): RoomSurface[];
     getFloorY(fallback: number): number;
+    private playerFloor;
+    hasMissingWalls(): boolean;
+    private outlineOf;
+    private wallLine;
+    playerRoomState(): PlayerRoomState;
+    private inPlayerRoom;
+    private playerRoom;
+    private inRoom;
     private createSkybox;
     private setupMovement;
     private setupFeatures;

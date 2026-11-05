@@ -2,6 +2,8 @@ import { Ray } from "@babylonjs/core/Culling/ray";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { PolygonMeshBuilder } from "@babylonjs/core/Meshes/polygonMesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -11,6 +13,7 @@ import { WebXRFeatureName } from "@babylonjs/core/XR/webXRFeaturesManager";
 import { WebXRState } from "@babylonjs/core/XR/webXRTypes";
 import { XRInputControllers } from "./XRInputControllers";
 import earcut from "earcut";
+import { gapPanels, isBehindWall, openWallEnds, stretchWall, wallOverlap, } from "./RoomGaps";
 import { OccluderPlane } from "./OccluderPlane";
 import { Portal } from "./Portal";
 import { ErrorScreenXR } from "../screen/ErrorScreenXR";
@@ -22,6 +25,14 @@ const MAX_SURFACE_THICKNESS = 0.2;
 // The portal draws over furniture whose near edge is this close to its wall. Paths only ignore
 // furniture that's entirely this close, so they still avoid a deep table against the wall.
 const PORTAL_FURNITURE_GAP = 0.5;
+// A wall moving by less than this keeps its shape.
+const OUTLINE_CHANGE = 0.02;
+const COPY_OF_WALL_GAP = 0.15;
+const COPY_OF_WALL_DEPTH = 0.2;
+// How far a surface may reach past the edge of the floor under the player and still be part of
+// their room. Less than an inner wall is thick, so the next room's side of it doesn't count.
+const ROOM_EDGE = 0.1;
+const UNSCANNED_MESSAGE = "This room isn't scanned";
 export class XREnvironment {
     constructor(scene) {
         Object.defineProperty(this, "scene", {
@@ -153,13 +164,36 @@ export class XREnvironment {
             writable: true,
             value: false
         });
-        // The player chose the wall and may have looked away since, including when planes arrive
-        // late. The world is already turned to that wall, so left is along -X, not the head's left.
-        Object.defineProperty(this, "wallLocked", {
+        // Walls behind the portal wall, and the panels covering the gap they leave.
+        Object.defineProperty(this, "gapWalls", {
             enumerable: true,
             configurable: true,
             writable: true,
-            value: false
+            value: []
+        });
+        Object.defineProperty(this, "gapPanelMeshes", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "gapPreviewKey", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        Object.defineProperty(this, "previewMaterial", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        Object.defineProperty(this, "overlap", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: wallOverlap(window.location.search)
         });
         this.scene = scene;
         this.occluderMaterial = new StandardMaterial("om", scene);
@@ -242,9 +276,78 @@ export class XREnvironment {
             this.lastCheckTime = Date.now();
             this.planesScanning();
         });
+        webXRPlaneDetector.onPlaneRemovedObservable.add((plane) => {
+            this.forgetPlane(plane);
+        });
+        webXRPlaneDetector.onPlaneUpdatedObservable.add((plane) => {
+            this.followPlane(plane);
+        });
+    }
+    // The portal is built on its wall, so that wall stays for the session whatever the headset
+    // does. Any copy of it the headset reports later is left see-through.
+    forgetPlane(plane) {
+        if (plane === this.foundPlane)
+            return;
+        const index = this.planes.indexOf(plane);
+        if (index < 0)
+            return;
+        this.removePlaneMesh(plane);
+        this.planes.splice(index, 1);
+        this.gapPreviewKey = null;
+    }
+    followPlane(plane) {
+        if (!plane.mesh || plane === this.foundPlane)
+            return;
+        if (this.sameOutline(plane)) {
+            this.closePolygon(plane);
+            const mesh = plane.mesh;
+            plane.transformationMatrix.decompose(mesh.scaling, mesh.rotationQuaternion, mesh.position);
+            mesh.computeWorldMatrix(true);
+            return;
+        }
+        // Build it again, and let the usual pass decide what it does, as for a new surface.
+        this.removePlaneMesh(plane);
+        plane.scannedPositions = null;
+        plane.mesh = this.createPolygonMesh(plane);
+        plane.mesh.parent = this.wallAlignment;
+        plane.mesh.computeWorldMatrix(true);
+        plane.processed = false;
+        this.gapPreviewKey = null;
+        this.lastCheckTime = Date.now();
+        this.planesScanning();
+    }
+    // Whether the polygon still matches the one the mesh was built from, closing point aside.
+    sameOutline(plane) {
+        const built = plane.builtOutline;
+        const points = plane.polygonDefinition;
+        const open = points[0] === points[points.length - 1] ? points.slice(0, -1) : points;
+        if (!built || built.length !== open.length + 1)
+            return false;
+        return open.every((point, i) => Math.abs(point.x - built[i][0]) < OUTLINE_CHANGE &&
+            Math.abs(point.z - built[i][1]) < OUTLINE_CHANGE);
+    }
+    closePolygon(plane) {
+        const points = plane.polygonDefinition;
+        if (points[0] !== points[points.length - 1])
+            points.push(points[0]);
+    }
+    // Another report of the portal's own wall, rather than a neighbouring section of it.
+    isPortalWallCopy(plane) {
+        if (!this.foundPlane?.mesh || !this.isWall(plane))
+            return false;
+        plane.mesh.computeWorldMatrix(true);
+        const wall = this.foundPlane.mesh.getBoundingInfo().boundingBox;
+        const box = plane.mesh.getBoundingInfo().boundingBox;
+        const samePlane = Math.abs(box.centerWorld.z - wall.centerWorld.z) < COPY_OF_WALL_GAP &&
+            box.maximumWorld.z - box.minimumWorld.z < COPY_OF_WALL_DEPTH;
+        const shared = Math.min(box.maximumWorld.x, wall.maximumWorld.x) -
+            Math.max(box.minimumWorld.x, wall.minimumWorld.x);
+        const narrower = Math.min(box.maximumWorld.x - box.minimumWorld.x, wall.maximumWorld.x - wall.minimumWorld.x);
+        return samePlane && shared > narrower / 2;
     }
     createPolygonMesh(plane) {
-        plane.polygonDefinition.push(plane.polygonDefinition[0]);
+        this.closePolygon(plane);
+        plane.builtOutline = plane.polygonDefinition.map((p) => [p.x, p.z]);
         var polygon_triangulation = new PolygonMeshBuilder("xrPlaneMesh", plane.polygonDefinition.map((p) => new Vector2(p.x, p.z)), this.scene, earcut);
         var polygon = polygon_triangulation.build(false, 0.01);
         polygon.createNormals(true);
@@ -274,60 +377,142 @@ export class XREnvironment {
         }
         return false;
     }
-    findBasedOnCamera(camera, planes, ray, findType = "wall") {
-        // find all planes that are facing the camera
-        const matchingPlanes = planes.filter((plane) => {
-            return this.findPlaneWithRay(plane, ray, findType);
-        });
-        // find to the camera
-        const foundPlane = this.findClosestPlane(matchingPlanes, camera);
-        if (foundPlane) {
-            return foundPlane;
-        }
-        return null;
-    }
-    findLeftWall(camera, planes) {
-        const ray = new Ray(camera.globalPosition, this.wallLocked
-            ? new Vector3(-1, 0, 0)
-            : camera.getDirection(new Vector3(-1, 0, 0)));
-        return this.findBasedOnCamera(camera, planes, ray, "wall");
-    }
     removePlaneMesh(plane) {
         if (plane.mesh) {
             plane.mesh.dispose(false, true);
             plane.mesh = null;
         }
     }
+    // Walls behind the portal wall are removed, as they'd show through the portal, and panels
+    // cover the gap they leave beside it. Everything else stays: it's a real surface.
     removeAnyPlanBehindFoundPlane(foundPlane, planes, camera) {
-        const foundPlaneBoundingBox = foundPlane.mesh.getBoundingInfo()
-            .boundingBox;
-        const foundPlaneZMin = foundPlaneBoundingBox.minimumWorld.z;
-        const cameraZ = camera.globalPosition.z;
-        // Read up front because this loop can remove the left wall's mesh.
-        const leftWallX = this.findLeftWall(camera, planes)
-            ?.mesh.getAbsolutePosition().x;
-        for (let i = 0; i < planes.length; i++) {
-            const plane = planes[i];
-            if (plane.id === foundPlane.id) {
-                continue;
-            }
-            if (!plane.mesh)
-                continue;
-            const planeBoundingBox = plane.mesh.getBoundingInfo()
+        const { minimumWorld: wallMin, maximumWorld: wallMax } = foundPlane.mesh.getBoundingInfo().boundingBox;
+        if (camera.globalPosition.z >= wallMin.z)
+            return;
+        planes.forEach((plane) => {
+            if (plane.id === foundPlane.id || !plane.mesh)
+                return;
+            const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
                 .boundingBox;
-            const planeZMin = planeBoundingBox.minimumWorld.z;
-            if (cameraZ < foundPlaneZMin) {
-                // items that are fully behind the found plane
-                if (planeZMin > foundPlaneZMin) {
-                    this.removePlaneMesh(plane);
-                }
-                // items that are fully left of the left wall
-                if (leftWallX !== undefined &&
-                    planeBoundingBox.maximumWorld.x < leftWallX) {
-                    this.removePlaneMesh(plane);
-                }
+            // The wall's far face, as surfaces are compared by their own far faces.
+            if (!isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z)) {
+                return;
             }
-        }
+            if (this.isWall(plane)) {
+                this.gapWalls.push({
+                    minX: minimumWorld.x,
+                    maxX: maximumWorld.x,
+                    minY: minimumWorld.y,
+                    maxY: maximumWorld.y,
+                });
+            }
+            this.removePlaneMesh(plane);
+        });
+        this.placeGapPanels(wallMin, wallMax);
+    }
+    // Shows which surfaces would hide what's beyond the room if this wall became the portal, by
+    // the same rules as the game, while removing nothing: the player can still choose another
+    // wall. The glowing wall stays solid here, as its glow covers it. Safe to call often.
+    previewGaps(wall) {
+        const key = `${wall.id}:${this.planes.length}`;
+        if (key === this.gapPreviewKey)
+            return;
+        this.gapPreviewKey = key;
+        this.previewMaterial ?? (this.previewMaterial = this.createPreviewMaterial());
+        wall.mesh.computeWorldMatrix(true);
+        const { minimumWorld: wallMin, maximumWorld: wallMax } = wall.mesh.getBoundingInfo()
+            .boundingBox;
+        this.gapWalls = [];
+        this.planes.forEach((plane) => {
+            if (!plane.mesh)
+                return;
+            plane.mesh.computeWorldMatrix(true);
+            const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
+                .boundingBox;
+            const behind = plane !== wall &&
+                isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z);
+            if (behind && this.isWall(plane)) {
+                this.gapWalls.push({
+                    minX: minimumWorld.x,
+                    maxX: maximumWorld.x,
+                    minY: minimumWorld.y,
+                    maxY: maximumWorld.y,
+                });
+            }
+            const hidden = behind || (plane !== wall && this.isFurnitureAtWall(plane, wall));
+            plane.mesh.material = hidden ? null : this.previewMaterial;
+            this.restoreWallSize(plane);
+            if (!hidden && plane !== wall && this.isWall(plane)) {
+                this.stretchWallPast(plane, wallMin.z);
+            }
+        });
+        this.placeGapPanels(wallMin, wallMax);
+    }
+    endGapPreview() {
+        this.gapPreviewKey = null;
+        this.planes.forEach((plane) => {
+            if (!plane.mesh)
+                return;
+            plane.mesh.material = null;
+            this.restoreWallSize(plane);
+        });
+        this.previewMaterial?.dispose();
+        this.previewMaterial = null;
+        this.gapWalls = [];
+        this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
+        this.gapPanelMeshes = [];
+    }
+    // Bounds stay as scanned, so rifts and paths still use the wall's real size.
+    stretchWallPast(plane, limitZ) {
+        if (this.overlap === 0)
+            return;
+        const mesh = plane.mesh;
+        const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+        if (!positions)
+            return;
+        // Test Room's surfaces are copies that keep showing the wall's scanned size.
+        mesh.makeGeometryUnique();
+        plane.scannedPositions ?? (plane.scannedPositions = Array.from(positions));
+        const scannedBounds = mesh.getBoundingInfo();
+        mesh.computeWorldMatrix(true);
+        const world = mesh.getWorldMatrix();
+        const point = new Vector3();
+        mesh.setVerticesData(VertexBuffer.PositionKind, stretchWall(plane.scannedPositions, this.overlap, (x, y, z) => {
+            point.set(x, y, z);
+            return Vector3.TransformCoordinates(point, world).z;
+        }, limitZ));
+        mesh.setBoundingInfo(scannedBounds);
+        // Its bounds are smaller than the stretched wall, so it must never be culled by them.
+        mesh.alwaysSelectAsActiveMesh = true;
+    }
+    restoreWallSize(plane) {
+        if (!plane.scannedPositions)
+            return;
+        const scannedBounds = plane.mesh.getBoundingInfo();
+        plane.mesh.setVerticesData(VertexBuffer.PositionKind, plane.scannedPositions);
+        plane.mesh.setBoundingInfo(scannedBounds);
+        plane.mesh.alwaysSelectAsActiveMesh = false;
+        plane.scannedPositions = null;
+    }
+    createPreviewMaterial() {
+        const material = new StandardMaterial("roomPreviewOccluder", this.scene);
+        material.disableLighting = true;
+        material.forceDepthWrite = true;
+        return material;
+    }
+    placeGapPanels(wallMin, wallMax) {
+        this.gapPanelMeshes.forEach((mesh) => mesh.dispose(false, true));
+        this.gapPanelMeshes = gapPanels({ minX: wallMin.x, maxX: wallMax.x, minY: wallMin.y, maxY: wallMax.y }, this.gapWalls).map((panel) => {
+            const mesh = MeshBuilder.CreatePlane("roomGapPanel", {
+                width: panel.maxX - panel.minX,
+                height: panel.maxY - panel.minY,
+                sideOrientation: Mesh.DOUBLESIDE,
+            }, this.scene);
+            mesh.position.set((panel.minX + panel.maxX) / 2, (panel.minY + panel.maxY) / 2, wallMin.z);
+            mesh.computeWorldMatrix(true);
+            new OccluderPlane(mesh, this.scene);
+            return mesh;
+        });
     }
     isWall(plane) {
         return plane.xrPlane.semanticLabel === "wall";
@@ -348,7 +533,13 @@ export class XREnvironment {
             plane.facingPlane = this.findPlaneWithRay(plane, forwardRay);
         });
         if (!this.foundPlane) {
-            this.foundPlane = this.findClosestFacingPlane(newPlanes, camera);
+            const room = this.playerRoomState();
+            if (room === "unscanned") {
+                this.showMessage(UNSCANNED_MESSAGE);
+                this.requestRoomCapture(UNSCANNED_MESSAGE);
+                return;
+            }
+            this.foundPlane = this.findClosestFacingPlane(newPlanes.filter((plane) => this.inPlayerRoom(plane)), camera);
             if (!this.foundPlane) {
                 if (planes.some((plane) => this.isWall(plane))) {
                     this.showMessage("Face a wall to start");
@@ -421,7 +612,20 @@ export class XREnvironment {
             this.requestRoomCapture();
         }
     }
-    requestRoomCapture() {
+    // Opens the headset's own room setup, for a player who chose to scan again. Resolves to
+    // whether it started. The headset may allow it only once a session, and only from a press.
+    async rescanRoom() {
+        this.roomCaptureTried = true;
+        try {
+            await this.webXRPlaneDetector.initiateRoomCapture();
+            return true;
+        }
+        catch (error) {
+            log.warn("Couldn't start a room rescan", error);
+            return false;
+        }
+    }
+    requestRoomCapture(failed = "No suitable space found") {
         if (this.roomCaptureTried) {
             return;
         }
@@ -433,7 +637,7 @@ export class XREnvironment {
         })
             .catch((error) => {
             log.error("Error initiating room capture", error);
-            this.showMessage("No suitable space found");
+            this.showMessage(failed);
         });
     }
     showMessage(message) {
@@ -453,7 +657,7 @@ export class XREnvironment {
         this.lastCheckTime = 0;
         this.roomCaptureTried = false;
         this.choosingWall = false;
-        this.wallLocked = false;
+        this.endGapPreview();
         this.hideMessage();
         this.portal?.dispose();
         this.portal = null;
@@ -475,7 +679,9 @@ export class XREnvironment {
             this.processFoundPlane(polygonMesh, plane);
         }
         else {
-            if (plane.facingPlane || this.isFurnitureAtWall(plane, this.foundPlane)) {
+            if (plane.facingPlane ||
+                this.isFurnitureAtWall(plane, this.foundPlane) ||
+                this.isPortalWallCopy(plane)) {
                 // hide any walls behind the portal, and furniture right in front of it
                 const material = new StandardMaterial("hidden", this.scene);
                 material.alpha = 0.0;
@@ -484,6 +690,11 @@ export class XREnvironment {
             else {
                 const solid = !NOT_FURNITURE.includes(plane.xrPlane.semanticLabel ?? "");
                 new OccluderPlane(polygonMesh, this.scene, solid);
+                if (this.isWall(plane) && this.foundPlane?.mesh) {
+                    const { minimumWorld } = this.foundPlane.mesh.getBoundingInfo()
+                        .boundingBox;
+                    this.stretchWallPast(plane, minimumWorld.z);
+                }
                 if (solid) {
                     this.portal?.blockGlow(polygonMesh);
                 }
@@ -557,8 +768,10 @@ export class XREnvironment {
         if (!camera)
             return null;
         const walls = new Map();
+        if (this.playerRoomState() === "unscanned")
+            return null;
         this.planes.forEach((plane) => {
-            if (plane.mesh && this.isWall(plane))
+            if (plane.mesh && this.isWall(plane) && this.inPlayerRoom(plane))
                 walls.set(plane.mesh, plane);
         });
         const picked = this.scene.pickWithRay(camera.getForwardRay(100, undefined, camera.globalPosition), (mesh) => walls.has(mesh));
@@ -585,9 +798,12 @@ export class XREnvironment {
     // must already face +Z. Upright surfaces have no top to fly over, so they don't count.
     // Nor does furniture entirely beside the wall.
     getPathFurniturePlanes(wall) {
+        const room = this.playerRoom(this.scene.activeCamera?.globalPosition);
         return this.planes.filter((plane) => {
             const label = plane.xrPlane.semanticLabel ?? "";
             if (!plane.mesh || NOT_FURNITURE.includes(label))
+                return false;
+            if (!this.inRoom(plane, room))
                 return false;
             plane.mesh.computeWorldMatrix(true);
             const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
@@ -608,7 +824,6 @@ export class XREnvironment {
             return;
         this.previewWall(wall);
         this.choosingWall = false;
-        this.wallLocked = true;
         this.foundPlane = wall;
         this.hideMessage();
         const center = wall.mesh.getBoundingInfo().boundingBox.centerWorld;
@@ -628,11 +843,15 @@ export class XREnvironment {
         });
     }
     // Walls and ceilings other than the portal wall. Normals point into the room.
+    // Only the player's own room, though other rooms' surfaces still hide the stars.
     getRoomSurfaces(head) {
         const surfaces = [];
+        const room = this.playerRoom(head);
         this.planes.forEach((plane) => {
             const label = plane.xrPlane.semanticLabel ?? "";
             if (!plane.mesh || (label !== "wall" && label !== "ceiling"))
+                return;
+            if (!this.inRoom(plane, room))
                 return;
             if (plane.id === this.foundPlane?.id || plane.facingPlane)
                 return;
@@ -660,8 +879,87 @@ export class XREnvironment {
         return surfaces;
     }
     getFloorY(fallback) {
-        const floor = this.planes.find((plane) => plane.xrPlane.semanticLabel === "floor" && plane.mesh);
+        const floor = this.playerFloor(this.scene.activeCamera?.globalPosition) ??
+            this.planes.find((plane) => plane.xrPlane.semanticLabel === "floor" && plane.mesh);
         return floor ? floor.mesh.getAbsolutePosition().y : fallback;
+    }
+    // The headset reports every room it has scanned. The player's is the floor under their head.
+    playerFloor(head) {
+        if (!head)
+            return null;
+        return (this.planes.find((plane) => {
+            if (plane.xrPlane.semanticLabel !== "floor" || !plane.mesh)
+                return false;
+            plane.mesh.computeWorldMatrix(true);
+            const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
+            return (head.x >= minimumWorld.x - ROOM_EDGE &&
+                head.x <= maximumWorld.x + ROOM_EDGE &&
+                head.z >= minimumWorld.z - ROOM_EDGE &&
+                head.z <= maximumWorld.z + ROOM_EDGE);
+        }) ?? null);
+    }
+    // Whether a wall of the player's room ends without meeting another, so one is missing.
+    hasMissingWalls() {
+        const floor = this.playerFloor(this.scene.activeCamera?.globalPosition);
+        if (!floor)
+            return false;
+        const room = this.playerRoom(this.scene.activeCamera?.globalPosition);
+        const walls = this.planes
+            .filter((plane) => plane.mesh && this.isWall(plane) && this.inRoom(plane, room))
+            .map((plane) => this.wallLine(plane));
+        return openWallEnds(walls) > 0;
+    }
+    // A surface's outline, seen from above.
+    outlineOf(plane) {
+        const matrix = plane.mesh.computeWorldMatrix(true);
+        const points = plane.polygonDefinition;
+        const open = points[0] === points[points.length - 1] ? points.slice(0, -1) : points;
+        return open.map((p) => {
+            const world = Vector3.TransformCoordinates(new Vector3(p.x, 0, p.z), matrix);
+            return { x: world.x, z: world.z };
+        });
+    }
+    // A wall seen from above: the line between its two furthest apart corners.
+    wallLine(plane) {
+        const points = this.outlineOf(plane);
+        let ends = [points[0], points[0]];
+        let longest = -1;
+        points.forEach((a) => points.forEach((b) => {
+            const length = Math.hypot(a.x - b.x, a.z - b.z);
+            if (length > longest) {
+                longest = length;
+                ends = [a, b];
+            }
+        }));
+        return ends;
+    }
+    playerRoomState() {
+        if (!this.planes.some((plane) => plane.xrPlane.semanticLabel === "floor" && plane.mesh)) {
+            return "unknown";
+        }
+        return this.playerFloor(this.scene.activeCamera?.globalPosition) ? "scanned" : "unscanned";
+    }
+    // Whether this surface is part of the room the player stands in, or can't be ruled out.
+    inPlayerRoom(plane) {
+        return this.inRoom(plane, this.playerRoom(this.scene.activeCamera?.globalPosition));
+    }
+    // The player's floor, as a box. Null when no floor is under the head, so nothing is left out.
+    playerRoom(head) {
+        const floor = this.playerFloor(head);
+        if (!floor)
+            return null;
+        const { minimumWorld, maximumWorld } = floor.mesh.getBoundingInfo().boundingBox;
+        return { minX: minimumWorld.x, maxX: maximumWorld.x, minZ: minimumWorld.z, maxZ: maximumWorld.z };
+    }
+    inRoom(plane, room) {
+        if (!room)
+            return true;
+        plane.mesh.computeWorldMatrix(true);
+        const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
+        return (minimumWorld.x >= room.minX - ROOM_EDGE &&
+            maximumWorld.x <= room.maxX + ROOM_EDGE &&
+            minimumWorld.z >= room.minZ - ROOM_EDGE &&
+            maximumWorld.z <= room.maxZ + ROOM_EDGE);
     }
     createSkybox() {
         const skybox = MeshBuilder.CreateBox("skyBox", { size: 700.0 }, this.scene);
