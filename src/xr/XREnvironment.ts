@@ -45,6 +45,10 @@ const MAX_SURFACE_THICKNESS = 0.2;
 // The portal draws over furniture whose near edge is this close to its wall. Paths only ignore
 // furniture that's entirely this close, so they still avoid a deep table against the wall.
 const PORTAL_FURNITURE_GAP = 0.5;
+// A wall moving by less than this keeps its shape.
+const OUTLINE_CHANGE = 0.02;
+const COPY_OF_WALL_GAP = 0.15;
+const COPY_OF_WALL_DEPTH = 0.2;
 
 export class XREnvironment {
   private static instance: XREnvironment;
@@ -177,10 +181,91 @@ export class XREnvironment {
       this.lastCheckTime = Date.now();
       this.planesScanning();
     });
+    webXRPlaneDetector.onPlaneRemovedObservable.add((plane: any) => {
+      this.forgetPlane(plane);
+    });
+    webXRPlaneDetector.onPlaneUpdatedObservable.add((plane: any) => {
+      this.followPlane(plane);
+    });
+  }
+
+  // The portal is built on its wall, so that wall stays for the session whatever the headset
+  // does. Any copy of it the headset reports later is left see-through.
+  private forgetPlane(plane: any) {
+    if (plane === this.foundPlane) return;
+    const index = this.planes.indexOf(plane);
+    if (index < 0) return;
+    this.removePlaneMesh(plane);
+    this.planes.splice(index, 1);
+    this.gapPreviewKey = null;
+  }
+
+  private followPlane(plane: any) {
+    if (!plane.mesh || plane === this.foundPlane) return;
+    if (this.sameOutline(plane)) {
+      this.closePolygon(plane);
+      const mesh = plane.mesh as Mesh;
+      plane.transformationMatrix.decompose(
+        mesh.scaling,
+        mesh.rotationQuaternion!,
+        mesh.position
+      );
+      mesh.computeWorldMatrix(true);
+      return;
+    }
+    // Build it again, and let the usual pass decide what it does, as for a new surface.
+    this.removePlaneMesh(plane);
+    plane.scannedPositions = null;
+    plane.mesh = this.createPolygonMesh(plane);
+    plane.mesh.parent = this.wallAlignment;
+    plane.mesh.computeWorldMatrix(true);
+    plane.processed = false;
+    this.gapPreviewKey = null;
+    this.lastCheckTime = Date.now();
+    this.planesScanning();
+  }
+
+  // Whether the polygon still matches the one the mesh was built from, closing point aside.
+  private sameOutline(plane: any): boolean {
+    const built = plane.builtOutline as number[][] | undefined;
+    const points = plane.polygonDefinition as { x: number; z: number }[];
+    const open =
+      points[0] === points[points.length - 1] ? points.slice(0, -1) : points;
+    if (!built || built.length !== open.length + 1) return false;
+    return open.every(
+      (point, i) =>
+        Math.abs(point.x - built[i][0]) < OUTLINE_CHANGE &&
+        Math.abs(point.z - built[i][1]) < OUTLINE_CHANGE
+    );
+  }
+
+  private closePolygon(plane: any) {
+    const points = plane.polygonDefinition;
+    if (points[0] !== points[points.length - 1]) points.push(points[0]);
+  }
+
+  // Another report of the portal's own wall, rather than a neighbouring section of it.
+  private isPortalWallCopy(plane: any): boolean {
+    if (!this.foundPlane?.mesh || !this.isWall(plane)) return false;
+    plane.mesh.computeWorldMatrix(true);
+    const wall = this.foundPlane.mesh.getBoundingInfo().boundingBox;
+    const box = plane.mesh.getBoundingInfo().boundingBox;
+    const samePlane =
+      Math.abs(box.centerWorld.z - wall.centerWorld.z) < COPY_OF_WALL_GAP &&
+      box.maximumWorld.z - box.minimumWorld.z < COPY_OF_WALL_DEPTH;
+    const shared =
+      Math.min(box.maximumWorld.x, wall.maximumWorld.x) -
+      Math.max(box.minimumWorld.x, wall.minimumWorld.x);
+    const narrower = Math.min(
+      box.maximumWorld.x - box.minimumWorld.x,
+      wall.maximumWorld.x - wall.minimumWorld.x
+    );
+    return samePlane && shared > narrower / 2;
   }
 
   private createPolygonMesh(plane: any) {
-    plane.polygonDefinition.push(plane.polygonDefinition[0]);
+    this.closePolygon(plane);
+    plane.builtOutline = plane.polygonDefinition.map((p: any) => [p.x, p.z]);
     var polygon_triangulation = new PolygonMeshBuilder(
       "xrPlaneMesh",
       plane.polygonDefinition.map((p: any) => new Vector2(p.x, p.z)),
@@ -547,7 +632,11 @@ export class XREnvironment {
     if (plane.id === this.foundPlane?.id) {
       this.processFoundPlane(polygonMesh, plane);
     } else {
-      if (plane.facingPlane || this.isFurnitureAtWall(plane, this.foundPlane)) {
+      if (
+        plane.facingPlane ||
+        this.isFurnitureAtWall(plane, this.foundPlane) ||
+        this.isPortalWallCopy(plane)
+      ) {
         // hide any walls behind the portal, and furniture right in front of it
         const material = new StandardMaterial("hidden", this.scene);
         material.alpha = 0.0;

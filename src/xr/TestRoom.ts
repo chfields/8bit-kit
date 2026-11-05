@@ -118,6 +118,7 @@ export class TestRoom {
     const now = performance.now();
     if (this.finishing || now - this.lastCheck < CHECK_INTERVAL_MS) return;
     this.lastCheck = now;
+    if (this.wall && !this.wall.mesh) this.loseWall();
     const faced = this.options.xrEnvironment.getFacedWall();
     if (!this.picked && faced && faced !== this.wall) {
       this.showWall(faced);
@@ -254,6 +255,17 @@ export class TestRoom {
     this.space?.dispose(false, true);
     this.space = null;
     this.placeTextAndButtons();
+  }
+
+  // The headset removed the wall, so the player chooses again.
+  private loseWall() {
+    this.wall = null;
+    this.picked = false;
+    this.options.xrEnvironment.endGapPreview();
+    this.space?.dispose(false, true);
+    this.space = null;
+    this.glow = null;
+    this.clearTextAndButtons();
   }
 
   private placeTextAndButtons() {
