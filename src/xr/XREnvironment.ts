@@ -49,6 +49,10 @@ const PORTAL_FURNITURE_GAP = 0.5;
 const OUTLINE_CHANGE = 0.02;
 const COPY_OF_WALL_GAP = 0.15;
 const COPY_OF_WALL_DEPTH = 0.2;
+// How far a surface may reach past the edge of the floor under the player and still be part of
+// their room. Less than an inner wall is thick, so the next room's side of it doesn't count.
+const ROOM_EDGE = 0.1;
+type Extent2D = { minX: number; maxX: number; minZ: number; maxZ: number };
 
 export class XREnvironment {
   private static instance: XREnvironment;
@@ -575,6 +579,19 @@ export class XREnvironment {
     }
   }
 
+  // Opens the headset's own room setup, for a player who chose to scan again. Resolves to
+  // whether it started. The headset may allow it only once a session, and only from a press.
+  public async rescanRoom(): Promise<boolean> {
+    this.roomCaptureTried = true;
+    try {
+      await this.webXRPlaneDetector!.initiateRoomCapture();
+      return true;
+    } catch (error) {
+      log.warn("Couldn't start a room rescan", error);
+      return false;
+    }
+  }
+
   private requestRoomCapture() {
     if (this.roomCaptureTried) {
       return;
@@ -772,9 +789,11 @@ export class XREnvironment {
   // must already face +Z. Upright surfaces have no top to fly over, so they don't count.
   // Nor does furniture entirely beside the wall.
   public getPathFurniturePlanes(wall: any): any[] {
+    const room = this.playerRoom(this.scene.activeCamera?.globalPosition);
     return this.planes.filter((plane) => {
       const label = plane.xrPlane.semanticLabel ?? "";
       if (!plane.mesh || NOT_FURNITURE.includes(label)) return false;
+      if (!this.inRoom(plane, room)) return false;
       plane.mesh.computeWorldMatrix(true);
       const { minimumWorld, maximumWorld } =
         plane.mesh.getBoundingInfo().boundingBox;
@@ -818,11 +837,14 @@ export class XREnvironment {
   }
 
   // Walls and ceilings other than the portal wall. Normals point into the room.
+  // Only the player's own room, though other rooms' surfaces still hide the stars.
   public getRoomSurfaces(head: Vector3): RoomSurface[] {
     const surfaces: RoomSurface[] = [];
+    const room = this.playerRoom(head);
     this.planes.forEach((plane) => {
       const label = plane.xrPlane.semanticLabel ?? "";
       if (!plane.mesh || (label !== "wall" && label !== "ceiling")) return;
+      if (!this.inRoom(plane, room)) return;
       if (plane.id === this.foundPlane?.id || plane.facingPlane) return;
       plane.mesh.computeWorldMatrix(true);
       const { minimumWorld, maximumWorld, centerWorld } =
@@ -850,10 +872,48 @@ export class XREnvironment {
   }
 
   public getFloorY(fallback: number): number {
-    const floor = this.planes.find(
-      (plane) => plane.xrPlane.semanticLabel === "floor" && plane.mesh
-    );
+    const floor =
+      this.playerFloor(this.scene.activeCamera?.globalPosition) ??
+      this.planes.find((plane) => plane.xrPlane.semanticLabel === "floor" && plane.mesh);
     return floor ? floor.mesh.getAbsolutePosition().y : fallback;
+  }
+
+  // The headset reports every room it has scanned. The player's is the floor under their head.
+  private playerFloor(head?: Vector3): any {
+    if (!head) return null;
+    return (
+      this.planes.find((plane) => {
+        if (plane.xrPlane.semanticLabel !== "floor" || !plane.mesh) return false;
+        plane.mesh.computeWorldMatrix(true);
+        const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
+        return (
+          head.x >= minimumWorld.x &&
+          head.x <= maximumWorld.x &&
+          head.z >= minimumWorld.z &&
+          head.z <= maximumWorld.z
+        );
+      }) ?? null
+    );
+  }
+
+  // The player's floor, as a box. Null when no floor is under the head, so nothing is left out.
+  private playerRoom(head?: Vector3): Nullable<Extent2D> {
+    const floor = this.playerFloor(head);
+    if (!floor) return null;
+    const { minimumWorld, maximumWorld } = floor.mesh.getBoundingInfo().boundingBox;
+    return { minX: minimumWorld.x, maxX: maximumWorld.x, minZ: minimumWorld.z, maxZ: maximumWorld.z };
+  }
+
+  private inRoom(plane: any, room: Nullable<Extent2D>): boolean {
+    if (!room) return true;
+    plane.mesh.computeWorldMatrix(true);
+    const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
+    return (
+      minimumWorld.x >= room.minX - ROOM_EDGE &&
+      maximumWorld.x <= room.maxX + ROOM_EDGE &&
+      minimumWorld.z >= room.minZ - ROOM_EDGE &&
+      maximumWorld.z <= room.maxZ + ROOM_EDGE
+    );
   }
 
   private createSkybox() {

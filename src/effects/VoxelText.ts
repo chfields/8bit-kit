@@ -78,6 +78,10 @@ export function voxelTextWidth(text: string, cubeSize: number): number {
   return (text.length * (GLYPH_WIDTH + 1) - 1) * cubeSize;
 }
 
+export function voxelTextHeight(cubeSize: number): number {
+  return GLYPH_HEIGHT * cubeSize;
+}
+
 // Text built from real 3D cubes, readable from a player looking along +Z.
 export class VoxelText {
   private scene: Scene;

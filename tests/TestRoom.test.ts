@@ -29,6 +29,8 @@ describe("TestRoom's aimed buttons", () => {
   let aim: Nullable<Ray>;
   let wall: any;
   let room: TestRoom;
+  let rescans: number;
+  let rescanStarts: boolean;
   const environment = () =>
     ({
       getFacedWall: () => wall,
@@ -40,6 +42,10 @@ describe("TestRoom's aimed buttons", () => {
       getPathFurniturePlanes: () => [],
       getFloorY: (fallback: number) => fallback,
       lockWall: () => {},
+      rescanRoom: async () => {
+        rescans++;
+        return rescanStarts;
+      },
     }) as any;
 
   beforeEach(() => {
@@ -47,6 +53,8 @@ describe("TestRoom's aimed buttons", () => {
     engine = new NullEngine();
     scene = new Scene(engine);
     new FreeCamera("camera", HEAD.clone(), scene);
+    rescans = 0;
+    rescanStarts = true;
     aim = aimedAt(START_X);
     const mesh = MeshBuilder.CreateBox("wall", { width: 4, height: 3, depth: 0.01 }, scene);
     mesh.position.z = 3;
@@ -130,5 +138,50 @@ describe("TestRoom's aimed buttons", () => {
     expect(room.aimedDistance()).toBeNull();
     room.dispose();
     expect(room.aimedDistance()).toBeNull();
+  });
+
+  // The wall is 4 m wide and 3 m tall, centred on x 0 and y 0.
+  test("RESCAN SPACE sits at the top left of the faced wall, in front of it", () => {
+    const rescan = button("testRoomRescanButton")!;
+    expect(rescan).not.toBeNull();
+    rescan.computeWorldMatrix(true);
+    const { minimumWorld, maximumWorld } = rescan.getBoundingInfo().boundingBox;
+    expect(minimumWorld.x).toBeGreaterThanOrEqual(-2);
+    expect(minimumWorld.x).toBeLessThan(-1.7);
+    expect(maximumWorld.y).toBeLessThanOrEqual(1.5);
+    expect(maximumWorld.y).toBeGreaterThan(1.2);
+    expect(rescan.position.z).toBeCloseTo(BUTTON_Z);
+  });
+
+  test("RESCAN SPACE stays once a wall is picked", () => {
+    (room as any).pick();
+    expect(button("testRoomRescanButton")).not.toBeNull();
+  });
+
+  test("RESCAN SPACE asks the headset to scan the room, then the buttons work again", async () => {
+    (room as any).pick();
+    (room as any).finishing = true;
+    await (room as any).rescan();
+    expect(rescans).toBe(1);
+    expect((room as any).picked).toBe(false);
+    expect(button("testRoomPickButton")).not.toBeNull();
+    scene.render();
+    expect(room.pressAimed()).toBe(true);
+  });
+
+  test("a rescan that doesn't start says so", async () => {
+    rescanStarts = false;
+    await (room as any).rescan();
+    expect((room as any).warningsShown).toContain("COULDN'T START A RESCAN");
+    rescanStarts = true;
+    await (room as any).rescan();
+    expect((room as any).warningsShown).not.toContain("COULDN'T START A RESCAN");
+  });
+
+  test("a rescan that finishes after the room is gone does nothing", async () => {
+    const rescanning = (room as any).rescan();
+    room.dispose();
+    await rescanning;
+    expect(button("testRoomStartButton")).toBeNull();
   });
 });
