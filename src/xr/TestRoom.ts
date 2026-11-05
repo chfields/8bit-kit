@@ -17,11 +17,17 @@ import { RoomLimits, roomWarnings } from "./RoomCheck";
 import { XREnvironment } from "./XREnvironment";
 
 // A game adds these to PlayerBullet.configure's destroys, so shots reach the buttons.
-export const TEST_ROOM_BUTTON_TYPES = ["testRoomStart", "testRoomBack"];
+export const TEST_ROOM_BUTTON_TYPES = [
+  "testRoomStart",
+  "testRoomBack",
+  "testRoomPick",
+  "testRoomChange",
+];
 
 // Often enough to feel live, and rarely enough that the glow doesn't flicker.
 const CHECK_INTERVAL_MS = 250;
 const TITLE = "THIS WALL WILL BE THE PORTAL";
+const PICKED_TITLE = "LOOK AROUND FOR RED GAPS";
 const NO_WALL_TITLE = "FACE A WALL";
 const TEXT_CUBE_SIZE = 0.012;
 const WARNING_CUBE_SIZE = 0.009;
@@ -35,6 +41,7 @@ const TITLE_ABOVE_HEAD = 0.45;
 const WARNING_GAP = 0.15;
 const BUTTONS_BELOW_HEAD = 0.25;
 const BUTTON_SPACING = 0.5;
+const PICK_BELOW_BUTTONS = 0.2;
 // With no wall to stand against, how far ahead of the player the text and button go.
 const NO_WALL_DISTANCE = 2;
 const GLOW_ALPHA = 0.25;
@@ -43,6 +50,7 @@ const TEXT_COLOR = new Color3(0.2, 1, 0.9);
 const WARNING_COLOR = new Color3(1, 0.8, 0.1);
 const START_COLOR = new Color3(0.2, 0.95, 0.3);
 const BACK_COLOR = new Color3(0.95, 0.2, 0.2);
+const PICK_COLOR = new Color3(1, 0.8, 0.1);
 const SURFACE_COLOR = new Color3(0.6, 0.6, 0.8);
 const SURFACE_ALPHA = 0.2;
 // local-floor puts the floor here, for when no floor has been scanned.
@@ -74,6 +82,8 @@ export class TestRoom {
   private lastCheck = 0;
   private disposed = false;
   private finishing = false;
+  // The player has picked this wall to look for gaps, so turning doesn't change it.
+  private picked = false;
   private wall: any = null;
   private glow: Nullable<Mesh> = null;
   private glowMaterial: StandardMaterial;
@@ -109,11 +119,12 @@ export class TestRoom {
     if (this.finishing || now - this.lastCheck < CHECK_INTERVAL_MS) return;
     this.lastCheck = now;
     const faced = this.options.xrEnvironment.getFacedWall();
-    if (faced && faced !== this.wall) {
+    if (!this.picked && faced && faced !== this.wall) {
       this.showWall(faced);
     } else if (this.wall) {
       this.updateWarnings();
-      this.options.xrEnvironment.previewGaps(this.wall);
+      // The headset can report more of the room while the player looks around.
+      if (this.picked) this.options.xrEnvironment.previewGaps(this.wall);
     } else if (!this.noWallShown) {
       this.showNoWall();
     }
@@ -223,11 +234,31 @@ export class TestRoom {
     this.wall = wall;
     this.noWallShown = false;
     this.options.xrEnvironment.previewWall(wall);
-    this.options.xrEnvironment.previewGaps(wall);
-    this.showSpace();
     this.showGlow(wall);
-    this.clearTextAndButtons();
+    this.placeTextAndButtons();
+  }
 
+  // Gaps depend on which wall is the portal, so they only show once one is picked.
+  private pick() {
+    this.picked = true;
+    this.finishing = false;
+    this.options.xrEnvironment.previewGaps(this.wall);
+    this.showSpace();
+    this.placeTextAndButtons();
+  }
+
+  private change() {
+    this.picked = false;
+    this.finishing = false;
+    this.options.xrEnvironment.endGapPreview();
+    this.space?.dispose(false, true);
+    this.space = null;
+    this.placeTextAndButtons();
+  }
+
+  private placeTextAndButtons() {
+    this.clearTextAndButtons();
+    const title = this.picked ? PICKED_TITLE : TITLE;
     const { minimumWorld, maximumWorld } = this.wallBox();
     const head = this.head();
     const x = Math.min(Math.max(head.x, minimumWorld.x), maximumWorld.x);
@@ -236,15 +267,21 @@ export class TestRoom {
     this.texts.push(
       new VoxelText(
         this.scene,
-        TITLE,
+        title,
         new Vector3(x, head.y + TITLE_ABOVE_HEAD, z),
-        this.fittedCubeSize(TITLE, TEXT_CUBE_SIZE),
+        this.fittedCubeSize(title, TEXT_CUBE_SIZE),
         TEXT_COLOR
       )
     );
     const buttonY = head.y - BUTTONS_BELOW_HEAD;
     this.addButton("START", "testRoomStart", new Vector3(x - BUTTON_SPACING, buttonY, z), START_COLOR, () => this.start());
     this.addButton("BACK", "testRoomBack", new Vector3(x + BUTTON_SPACING, buttonY, z), BACK_COLOR, () => this.back());
+    const pickCenter = new Vector3(x, buttonY - PICK_BELOW_BUTTONS, z);
+    if (this.picked) {
+      this.addButton("CHANGE", "testRoomChange", pickCenter, PICK_COLOR, () => this.change());
+    } else {
+      this.addButton("PICK", "testRoomPick", pickCenter, PICK_COLOR, () => this.pick());
+    }
     this.updateWarnings();
   }
 
