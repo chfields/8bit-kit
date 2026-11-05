@@ -19,7 +19,15 @@ import { Nullable } from "@babylonjs/core/types";
 import { XRInputControllers } from "./XRInputControllers";
 import earcut from "earcut";
 import type { XRRange } from "./XRRange";
-import { Extent, gapPanels, isBehindWall, stretchWall, wallOverlap } from "./RoomGaps";
+import {
+  Extent,
+  gapPanels,
+  isBehindWall,
+  openWallEnds,
+  Point2,
+  stretchWall,
+  wallOverlap,
+} from "./RoomGaps";
 import { OccluderPlane } from "./OccluderPlane";
 import { RoomSurface } from "./RoomExits";
 import { Portal, PortalStart } from "./Portal";
@@ -53,6 +61,10 @@ const COPY_OF_WALL_DEPTH = 0.2;
 // their room. Less than an inner wall is thick, so the next room's side of it doesn't count.
 const ROOM_EDGE = 0.1;
 type Extent2D = { minX: number; maxX: number; minZ: number; maxZ: number };
+// Scanned: the player stands on a scanned floor. Unscanned: floors were scanned, but not this one.
+// Unknown: no floors at all, so nothing can be said about rooms.
+export type PlayerRoomState = "scanned" | "unscanned" | "unknown";
+const UNSCANNED_MESSAGE = "This room isn't scanned";
 
 export class XREnvironment {
   private static instance: XREnvironment;
@@ -497,7 +509,16 @@ export class XREnvironment {
     });
 
     if (!this.foundPlane) {
-      this.foundPlane = this.findClosestFacingPlane(newPlanes, camera);
+      const room = this.playerRoomState();
+      if (room === "unscanned") {
+        this.showMessage(UNSCANNED_MESSAGE);
+        this.requestRoomCapture(UNSCANNED_MESSAGE);
+        return;
+      }
+      this.foundPlane = this.findClosestFacingPlane(
+        newPlanes.filter((plane) => this.inPlayerRoom(plane)),
+        camera
+      );
       if (!this.foundPlane) {
         if (planes.some((plane) => this.isWall(plane))) {
           this.showMessage("Face a wall to start");
@@ -592,7 +613,7 @@ export class XREnvironment {
     }
   }
 
-  private requestRoomCapture() {
+  private requestRoomCapture(failed = "No suitable space found") {
     if (this.roomCaptureTried) {
       return;
     }
@@ -604,7 +625,7 @@ export class XREnvironment {
       })
       .catch((error) => {
         log.error("Error initiating room capture", error);
-        this.showMessage("No suitable space found");
+        this.showMessage(failed);
       });
   }
 
@@ -757,8 +778,9 @@ export class XREnvironment {
     const camera = this.scene.activeCamera;
     if (!camera) return null;
     const walls = new Map<unknown, any>();
+    if (this.playerRoomState() === "unscanned") return null;
     this.planes.forEach((plane) => {
-      if (plane.mesh && this.isWall(plane)) walls.set(plane.mesh, plane);
+      if (plane.mesh && this.isWall(plane) && this.inPlayerRoom(plane)) walls.set(plane.mesh, plane);
     });
     const picked = this.scene.pickWithRay(
       camera.getForwardRay(100, undefined, camera.globalPosition),
@@ -887,13 +909,64 @@ export class XREnvironment {
         plane.mesh.computeWorldMatrix(true);
         const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo().boundingBox;
         return (
-          head.x >= minimumWorld.x &&
-          head.x <= maximumWorld.x &&
-          head.z >= minimumWorld.z &&
-          head.z <= maximumWorld.z
+          head.x >= minimumWorld.x - ROOM_EDGE &&
+          head.x <= maximumWorld.x + ROOM_EDGE &&
+          head.z >= minimumWorld.z - ROOM_EDGE &&
+          head.z <= maximumWorld.z + ROOM_EDGE
         );
       }) ?? null
     );
+  }
+
+  // Whether a wall of the player's room ends without meeting another, so one is missing.
+  public hasMissingWalls(): boolean {
+    const floor = this.playerFloor(this.scene.activeCamera?.globalPosition);
+    if (!floor) return false;
+    const room = this.playerRoom(this.scene.activeCamera?.globalPosition);
+    const walls = this.planes
+      .filter((plane) => plane.mesh && this.isWall(plane) && this.inRoom(plane, room))
+      .map((plane) => this.wallLine(plane));
+    return openWallEnds(walls) > 0;
+  }
+
+  // A surface's outline, seen from above.
+  private outlineOf(plane: any): Point2[] {
+    const matrix = plane.mesh.computeWorldMatrix(true);
+    const points = plane.polygonDefinition as { x: number; z: number }[];
+    const open = points[0] === points[points.length - 1] ? points.slice(0, -1) : points;
+    return open.map((p) => {
+      const world = Vector3.TransformCoordinates(new Vector3(p.x, 0, p.z), matrix);
+      return { x: world.x, z: world.z };
+    });
+  }
+
+  // A wall seen from above: the line between its two furthest apart corners.
+  private wallLine(plane: any): [Point2, Point2] {
+    const points = this.outlineOf(plane);
+    let ends: [Point2, Point2] = [points[0], points[0]];
+    let longest = -1;
+    points.forEach((a) =>
+      points.forEach((b) => {
+        const length = Math.hypot(a.x - b.x, a.z - b.z);
+        if (length > longest) {
+          longest = length;
+          ends = [a, b];
+        }
+      })
+    );
+    return ends;
+  }
+
+  public playerRoomState(): PlayerRoomState {
+    if (!this.planes.some((plane) => plane.xrPlane.semanticLabel === "floor" && plane.mesh)) {
+      return "unknown";
+    }
+    return this.playerFloor(this.scene.activeCamera?.globalPosition) ? "scanned" : "unscanned";
+  }
+
+  // Whether this surface is part of the room the player stands in, or can't be ruled out.
+  private inPlayerRoom(plane: any): boolean {
+    return this.inRoom(plane, this.playerRoom(this.scene.activeCamera?.globalPosition));
   }
 
   // The player's floor, as a box. Null when no floor is under the head, so nothing is left out.

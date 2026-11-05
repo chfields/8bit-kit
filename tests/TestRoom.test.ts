@@ -31,6 +31,8 @@ describe("TestRoom's aimed buttons", () => {
   let room: TestRoom;
   let rescans: number;
   let rescanStarts: boolean;
+  let roomState: string;
+  let missingWalls: boolean;
   const environment = () =>
     ({
       getFacedWall: () => wall,
@@ -42,6 +44,8 @@ describe("TestRoom's aimed buttons", () => {
       getPathFurniturePlanes: () => [],
       getFloorY: (fallback: number) => fallback,
       lockWall: () => {},
+      playerRoomState: () => roomState,
+      hasMissingWalls: () => missingWalls,
       rescanRoom: async () => {
         rescans++;
         return rescanStarts;
@@ -55,6 +59,8 @@ describe("TestRoom's aimed buttons", () => {
     new FreeCamera("camera", HEAD.clone(), scene);
     rescans = 0;
     rescanStarts = true;
+    roomState = "scanned";
+    missingWalls = false;
     aim = aimedAt(START_X);
     const mesh = MeshBuilder.CreateBox("wall", { width: 4, height: 3, depth: 0.01 }, scene);
     mesh.position.z = 3;
@@ -183,5 +189,43 @@ describe("TestRoom's aimed buttons", () => {
     room.dispose();
     await rescanning;
     expect(button("testRoomStartButton")).toBeNull();
+  });
+
+  const renderAfterCheck = () => {
+    vi.spyOn(performance, "now").mockReturnValue(20_000);
+    scene.render();
+    scene.render();
+  };
+
+  test("in a room that isn't scanned, it says so, with RESCAN SPACE and BACK but no START", () => {
+    roomState = "unscanned";
+    wall = null;
+    renderAfterCheck();
+    const texts = (room as any).texts.map((t: any) => t.text ?? t.message ?? "");
+    expect((room as any).unscannedShown).toBe(true);
+    expect(button("testRoomStartButton")).toBeNull();
+    expect(button("testRoomPickButton")).toBeNull();
+    expect(button("testRoomRescanButton")).not.toBeNull();
+    expect(button("testRoomBackButton")).not.toBeNull();
+    expect(texts.length).toBeGreaterThan(0);
+  });
+
+  test("once the room is scanned, the faced wall shows again", () => {
+    roomState = "unscanned";
+    const faced = wall;
+    wall = null;
+    renderAfterCheck();
+    roomState = "scanned";
+    wall = faced;
+    vi.spyOn(performance, "now").mockReturnValue(30_000);
+    scene.render();
+    expect((room as any).unscannedShown).toBe(false);
+    expect(button("testRoomStartButton")).not.toBeNull();
+  });
+
+  test("missing walls are warned about", () => {
+    missingWalls = true;
+    renderAfterCheck();
+    expect((room as any).warningsShown).toContain("SOME WALLS AREN'T SCANNED");
   });
 });

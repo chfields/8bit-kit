@@ -3,6 +3,8 @@ import {
   DEFAULT_WALL_OVERLAP,
   gapPanels,
   isBehindWall,
+  openWallEnds,
+  Point2,
   stretchWall,
   wallOverlap,
 } from "../src/xr/RoomGaps";
@@ -125,5 +127,49 @@ describe("stretchWall", () => {
 
   test("no overlap leaves the wall alone", () => {
     expect(stretchWall(corners, 0, worldZ, 100)).toEqual(corners);
+  });
+});
+
+describe("openWallEnds", () => {
+  const wall = (ax: number, az: number, bx: number, bz: number): [Point2, Point2] => [
+    { x: ax, z: az },
+    { x: bx, z: bz },
+  ];
+  const box = [wall(0, 0, 4, 0), wall(4, 0, 4, 3), wall(4, 3, 0, 3), wall(0, 3, 0, 0)];
+
+  test("is none when the walls close the room", () => {
+    expect(openWallEnds(box)).toBe(0);
+  });
+
+  test("is two when a wall is missing", () => {
+    expect(openWallEnds(box.slice(0, 3))).toBe(2);
+  });
+
+  test("counts walls that stop a little short of each other as meeting", () => {
+    const short = [wall(0.1, 0, 3.9, 0), wall(4, 0.1, 4, 2.9), wall(3.9, 3, 0.1, 3), wall(0, 2.9, 0, 0.1)];
+    expect(openWallEnds(short)).toBe(0);
+  });
+
+  test("finds a gap between two sections of one side", () => {
+    expect(openWallEnds([...box.slice(1), wall(0, 0, 1.5, 0), wall(2.5, 0, 4, 0)])).toBe(2);
+  });
+
+  test("works with an alcove and an angled corner", () => {
+    const shaped = [
+      wall(0, 0, 3, 0),
+      wall(3, 0, 4, 1),
+      wall(4, 1, 4, 2),
+      wall(4, 2, 5, 2),
+      wall(5, 2, 5, 3),
+      wall(5, 3, 0, 3),
+      wall(0, 3, 0, 0),
+    ];
+    expect(openWallEnds(shaped)).toBe(0);
+    expect(openWallEnds(shaped.filter((_, i) => i !== 1))).toBe(2);
+  });
+
+  test("a wall meeting the middle of another counts as meeting", () => {
+    expect(openWallEnds([...box, wall(2, 0, 2, 1.5)])).toBe(1);
+    expect(openWallEnds([...box, wall(2, 0, 2, 3)])).toBe(0);
   });
 });

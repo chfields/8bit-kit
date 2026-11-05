@@ -74,3 +74,32 @@ export function stretchWall(
   }
   return stretched;
 }
+
+export type Point2 = { x: number; z: number };
+
+// How far apart two walls' ends can be and still meet.
+const WALLS_MEET = 0.2;
+
+function distanceToSegment(point: Point2, [a, b]: [Point2, Point2]): number {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const lengthSquared = dx * dx + dz * dz;
+  const t = lengthSquared
+    ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.z - a.z) * dz) / lengthSquared))
+    : 0;
+  return Math.hypot(point.x - (a.x + t * dx), point.z - (a.z + t * dz));
+}
+
+// Walls seen from above, as lines. In a fully scanned room each end meets another wall, so an
+// end that meets none is where a wall is missing. The headset's floors are only rectangles
+// around the room, so they can't show where its walls should be.
+export function openWallEnds(walls: [Point2, Point2][]): number {
+  let open = 0;
+  walls.forEach((line, i) => {
+    line.forEach((end) => {
+      const meets = walls.some((other, j) => j !== i && distanceToSegment(end, other) <= WALLS_MEET);
+      if (!meets) open++;
+    });
+  });
+  return open;
+}

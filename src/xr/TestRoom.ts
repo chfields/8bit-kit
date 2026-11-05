@@ -32,6 +32,8 @@ const PICKED_TITLE = "LOOK AROUND FOR RED GAPS";
 const RESCAN_LABEL = "RESCAN SPACE";
 const RESCAN_FAILED = "COULDN'T START A RESCAN";
 const NO_WALL_TITLE = "FACE A WALL";
+const UNSCANNED_TITLE = "THIS ROOM ISN'T SCANNED";
+const MISSING_WALLS = "SOME WALLS AREN'T SCANNED";
 const TEXT_CUBE_SIZE = 0.012;
 const WARNING_CUBE_SIZE = 0.009;
 const BUTTON_CUBE_SIZE = 0.02;
@@ -104,6 +106,7 @@ export class TestRoom {
   private buttons: VoxelButton[] = [];
   private noWallShown = false;
   private rescanFailed = false;
+  private unscannedShown = false;
   // Where the title, buttons and warnings sit for the current wall, fixed when the wall is first shown.
   private placement = new Vector3();
 
@@ -128,6 +131,15 @@ export class TestRoom {
     if (this.finishing || now - this.lastCheck < CHECK_INTERVAL_MS) return;
     this.lastCheck = now;
     if (this.wall && !this.wall.mesh) this.loseWall();
+    if (this.options.xrEnvironment.playerRoomState() === "unscanned") {
+      if (!this.unscannedShown) this.showUnscanned();
+      this.updateSurfaces();
+      return;
+    }
+    if (this.unscannedShown) {
+      this.unscannedShown = false;
+      this.clearTextAndButtons();
+    }
     const faced = this.options.xrEnvironment.getFacedWall();
     if (!this.picked && faced && faced !== this.wall) {
       this.showWall(faced);
@@ -333,7 +345,14 @@ export class TestRoom {
     if (this.disposed) return;
     this.rescanFailed = !started;
     this.finishing = false;
-    if (this.wall) this.placeTextAndButtons();
+    if (this.wall) {
+      this.placeTextAndButtons();
+    } else {
+      // The tick shows whichever screen fits the room now.
+      this.unscannedShown = false;
+      this.noWallShown = false;
+      this.clearTextAndButtons();
+    }
   }
 
   // Drawn like the game's stars: after the room's surfaces, and only where they leave a gap.
@@ -388,6 +407,43 @@ export class TestRoom {
     this.addButton("BACK", "testRoomBack", new Vector3(head.x, head.y - BUTTONS_BELOW_HEAD, z), BACK_COLOR, () => this.back());
   }
 
+  // The player stands where the headset has no floor, so no wall can be trusted to be theirs.
+  private showUnscanned() {
+    if (this.wall) {
+      this.glow?.dispose();
+      this.loseWall();
+    }
+    this.unscannedShown = true;
+    this.noWallShown = false;
+    this.options.xrEnvironment.faceHead();
+    this.clearTextAndButtons();
+    const head = this.head();
+    const z = head.z + NO_WALL_DISTANCE;
+    this.texts.push(
+      new VoxelText(
+        this.scene,
+        UNSCANNED_TITLE,
+        new Vector3(head.x, head.y + TITLE_ABOVE_HEAD, z),
+        TEXT_CUBE_SIZE,
+        TEXT_COLOR
+      )
+    );
+    if (this.rescanFailed) {
+      this.warningTexts.push(
+        new VoxelText(
+          this.scene,
+          RESCAN_FAILED,
+          new Vector3(head.x, head.y + TITLE_ABOVE_HEAD - WARNING_GAP, z),
+          WARNING_CUBE_SIZE,
+          WARNING_COLOR
+        )
+      );
+    }
+    const buttonY = head.y - BUTTONS_BELOW_HEAD;
+    this.addButton(RESCAN_LABEL, "testRoomRescan", new Vector3(head.x - BUTTON_SPACING * 1.5, buttonY, z), RESCAN_COLOR, () => this.rescan());
+    this.addButton("BACK", "testRoomBack", new Vector3(head.x + BUTTON_SPACING * 1.5, buttonY, z), BACK_COLOR, () => this.back());
+  }
+
   private fittedCubeSize(text: string, cubeSize: number): number {
     const { minimumWorld, maximumWorld } = this.wallBox();
     const room = (maximumWorld.x - minimumWorld.x) * MAX_TEXT_WIDTH_OF_WALL;
@@ -404,6 +460,7 @@ export class TestRoom {
       },
       this.options.limits
     );
+    if (this.options.xrEnvironment.hasMissingWalls()) warnings.push(MISSING_WALLS);
     if (this.rescanFailed) warnings.push(RESCAN_FAILED);
     const key = warnings.join("|");
     if (key === this.warningsShown) return;
