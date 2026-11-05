@@ -82,6 +82,26 @@ That presses the button `getAimRay`'s ray is on, and returns whether it pressed 
 nothing once the room is finishing or disposed. `testRoom.aimedDistance()` gives the distance
 to that button, or null, so an aim line can end there.
 
+Once a wall is faced, PICK holds it, so the player can turn round without the choice moving,
+and CHANGE lets it go again. While a wall is picked, the room is shown as it will be in play,
+with red wherever space would show through. A game can do the same with
+`xrEnvironment.previewGaps(wall)` and `xrEnvironment.endGapPreview()`.
+
+## Room surfaces
+
+`xr/XREnvironment` follows the headset's room data for the whole session. A surface the
+headset removes goes, one it moves follows, and one whose outline changes is built again.
+The headset replaces every surface each time a session starts. The portal's wall never
+changes once it's found, and a later report of that same wall is ignored.
+
+Surfaces further back than the portal wall, such as an alcove or the next room, are removed,
+and an invisible panel in line with the portal wall covers the gap they leave beside it.
+
+Walls to the left, right and behind the player stretch 8 cm past their ends, which closes the
+cracks where two surfaces only just meet. Nothing stretches across the portal wall's plane.
+`?overlap=` in the URL sets the stretch in cm, in any build: `0` turns it off, and a value
+that isn't a number from 0 to 50 means the default.
+
 ## Pressing a button without a bullet
 
 `VoxelButton.press()` does what a bullet hit does: `onShot` fires once, however the button gets
