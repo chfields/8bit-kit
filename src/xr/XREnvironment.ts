@@ -22,7 +22,7 @@ import type { XRRange } from "./XRRange";
 import {
   Extent,
   gapPanels,
-  isBehindWall,
+  goesWithPortal,
   openWallEnds,
   Point2,
   stretchWall,
@@ -347,7 +347,8 @@ export class XREnvironment {
       const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
         .boundingBox as BoundingBox;
       // The wall's far face, as surfaces are compared by their own far faces.
-      if (!isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z)) {
+      const surface = { minZ: minimumWorld.z, maxZ: maximumWorld.z };
+      if (!goesWithPortal(surface, wallMax.z, this.inPlayerRoom(plane))) {
         return;
       }
       if (this.isWall(plane)) {
@@ -382,7 +383,11 @@ export class XREnvironment {
         .boundingBox as BoundingBox;
       const behind =
         plane !== wall &&
-        isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z);
+        goesWithPortal(
+          { minZ: minimumWorld.z, maxZ: maximumWorld.z },
+          wallMax.z,
+          this.inPlayerRoom(plane)
+        );
       if (behind && this.isWall(plane)) {
         this.gapWalls.push({
           minX: minimumWorld.x,

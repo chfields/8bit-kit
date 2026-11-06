@@ -108,7 +108,11 @@ a scanned room. The portal's wall never
 changes once it's found, and a later report of that same wall is ignored.
 
 Surfaces further back than the portal wall, such as an alcove or the next room, are removed,
-and an invisible panel in line with the portal wall covers the gap they leave beside it.
+and an invisible panel in line with the portal wall covers the gap they leave beside it. So is
+another room's surface that reaches past the portal wall, such as a neighbour's floor or ceiling
+that starts beside the player's room: seen through the portal, it would hide the stars. The
+player's own floor and ceiling stay, however far their scans run past the wall. The Test Room's
+PICK preview follows the same rule.
 
 Walls to the left, right and behind the player stretch 8 cm past their ends, which closes the
 cracks where two surfaces only just meet. Nothing stretches across the portal wall's plane.

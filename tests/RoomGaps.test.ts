@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   DEFAULT_WALL_OVERLAP,
   gapPanels,
+  goesWithPortal,
   isBehindWall,
   openWallEnds,
   showGapsFrom,
@@ -34,6 +35,28 @@ describe("isBehindWall", () => {
 
   test("a wall reaching well into the room and past the portal wall isn't behind it", () => {
     expect(isBehindWall({ minZ: -2, maxZ: 3.2 }, WALL_Z)).toBe(false);
+  });
+});
+
+describe("goesWithPortal", () => {
+  test("anything behind the portal wall goes, from any room", () => {
+    expect(goesWithPortal({ minZ: 3.2, maxZ: 3.2 }, WALL_Z, true)).toBe(true);
+    expect(goesWithPortal({ minZ: 3.2, maxZ: 3.2 }, WALL_Z, false)).toBe(true);
+  });
+
+  test("another room's floor that starts in front of the portal wall and runs behind it goes", () => {
+    // Seen through the portal, it would hide the stars beyond the wall.
+    expect(goesWithPortal({ minZ: 1, maxZ: 7.5 }, WALL_Z, false)).toBe(true);
+  });
+
+  test("the player's own floor stays, even where its scan runs a little past the portal wall", () => {
+    expect(goesWithPortal({ minZ: -4, maxZ: 2.03 }, WALL_Z, true)).toBe(false);
+    expect(goesWithPortal({ minZ: -4, maxZ: 3.2 }, WALL_Z, true)).toBe(false);
+  });
+
+  test("another room's surface that stops at the portal wall stays", () => {
+    expect(goesWithPortal({ minZ: 1, maxZ: 2.03 }, WALL_Z, false)).toBe(false);
+    expect(goesWithPortal({ minZ: -3, maxZ: 1 }, WALL_Z, false)).toBe(false);
   });
 });
 
