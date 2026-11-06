@@ -32,6 +32,8 @@ const COPY_OF_WALL_DEPTH = 0.2;
 // How far a surface may reach past the edge of the floor under the player and still be part of
 // their room. Less than an inner wall is thick, so the next room's side of it doesn't count.
 const ROOM_EDGE = 0.1;
+// A surface this close to the player's eyes is the headset's stand-in for one it can't place.
+const AT_HEAD = 0.05;
 const UNSCANNED_MESSAGE = "This room isn't scanned";
 export class XREnvironment {
     constructor(scene) {
@@ -94,6 +96,13 @@ export class XREnvironment {
             configurable: true,
             writable: true,
             value: []
+        });
+        // Surfaces the headset reported at the player's head, left out until it places them.
+        Object.defineProperty(this, "unplacedPlanes", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
         });
         Object.defineProperty(this, "lastCheckTime", {
             enumerable: true,
@@ -272,16 +281,50 @@ export class XREnvironment {
         this.webXRPlaneDetector = webXRPlaneDetector;
         // check if plane detection has not been called in 1 second
         webXRPlaneDetector.onPlaneAddedObservable.add((plane) => {
+            if (this.atHead(plane)) {
+                this.unplacedPlanes.add(plane);
+                return;
+            }
             this.addPlane(plane);
             this.lastCheckTime = Date.now();
             this.planesScanning();
         });
         webXRPlaneDetector.onPlaneRemovedObservable.add((plane) => {
+            this.unplacedPlanes.delete(plane);
             this.forgetPlane(plane);
         });
         webXRPlaneDetector.onPlaneUpdatedObservable.add((plane) => {
+            if (this.unplacedPlanes.has(plane)) {
+                if (this.atHead(plane))
+                    return;
+                // Placed at last, so it's added as a new surface would be.
+                this.unplacedPlanes.delete(plane);
+                this.addPlane(plane);
+                this.lastCheckTime = Date.now();
+                this.planesScanning();
+                return;
+            }
+            if (this.atHead(plane) && this.planes.includes(plane) && plane !== this.foundPlane) {
+                this.forgetPlane(plane);
+                this.unplacedPlanes.add(plane);
+                return;
+            }
             this.followPlane(plane);
         });
+    }
+    // A headset that can't place a scanned room reports its surfaces at the player's head, moving
+    // with it. No real surface is where the player's eyes are.
+    atHead(plane) {
+        const camera = this.scene.activeCamera;
+        if (!camera || !plane.transformationMatrix)
+            return false;
+        // The headset moves the camera before a frame draws, so its drawn place can be a frame old,
+        // or from before the session on the first one.
+        camera.computeWorldMatrix();
+        const pose = this.wallAlignment
+            ? plane.transformationMatrix.multiply(this.wallAlignment.getWorldMatrix())
+            : plane.transformationMatrix;
+        return Vector3.Distance(pose.getTranslation(), camera.globalPosition) < AT_HEAD;
     }
     // The portal is built on its wall, so that wall stays for the session whatever the headset
     // does. Any copy of it the headset reports later is left see-through.
@@ -666,6 +709,7 @@ export class XREnvironment {
         this.skybox = null;
         this.planes.forEach((plane) => this.removePlaneMesh(plane));
         this.planes = [];
+        this.unplacedPlanes.clear();
         this.foundPlane = null;
         this.openPortalLater = null;
         if (this.xrHelper) {

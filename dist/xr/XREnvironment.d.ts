@@ -26,6 +26,7 @@ export declare class XREnvironment {
     foundPlane: any;
     private webXRPlaneDetector;
     private planes;
+    private unplacedPlanes;
     private lastCheckTime;
     private lastCheck;
     private spaceType;
@@ -50,6 +51,7 @@ export declare class XREnvironment {
     private addPlane;
     private planesScanning;
     private setupPlaneDetection;
+    private atHead;
     private forgetPlane;
     private followPlane;
     private sameOutline;
