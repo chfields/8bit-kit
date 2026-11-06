@@ -7,6 +7,13 @@ const SAME_PLANE = 0.05;
 export function isBehindWall(surface, wallZ) {
     return surface.minZ > wallZ - SAME_PLANE && surface.maxZ > wallZ + SAME_PLANE;
 }
+// Whether a surface goes once this wall is the portal. Anything behind the wall goes, and so does
+// another room's surface that reaches past it, such as a neighbour's floor starting under an
+// alcove: seen through the portal, it would hide the stars. The player's own floor and ceiling
+// stay, however far their scans run past the wall.
+export function goesWithPortal(surface, wallZ, inPlayerRoom) {
+    return (isBehindWall(surface, wallZ) || (!inPlayerRoom && surface.maxZ > wallZ + SAME_PLANE));
+}
 // The panels beside the portal wall, left first. Each is as tall as whatever it covers.
 export function gapPanels(wall, behind) {
     const panel = (minX, maxX, side) => ({

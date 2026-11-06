@@ -13,7 +13,7 @@ import { WebXRFeatureName } from "@babylonjs/core/XR/webXRFeaturesManager";
 import { WebXRState } from "@babylonjs/core/XR/webXRTypes";
 import { XRInputControllers } from "./XRInputControllers";
 import earcut from "earcut";
-import { gapPanels, isBehindWall, openWallEnds, stretchWall, wallOverlap, } from "./RoomGaps";
+import { gapPanels, goesWithPortal, openWallEnds, stretchWall, wallOverlap, } from "./RoomGaps";
 import { OccluderPlane } from "./OccluderPlane";
 import { Portal } from "./Portal";
 import { ErrorScreenXR } from "../screen/ErrorScreenXR";
@@ -395,7 +395,8 @@ export class XREnvironment {
             const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
                 .boundingBox;
             // The wall's far face, as surfaces are compared by their own far faces.
-            if (!isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z)) {
+            const surface = { minZ: minimumWorld.z, maxZ: maximumWorld.z };
+            if (!goesWithPortal(surface, wallMax.z, this.inPlayerRoom(plane))) {
                 return;
             }
             if (this.isWall(plane)) {
@@ -430,7 +431,7 @@ export class XREnvironment {
             const { minimumWorld, maximumWorld } = plane.mesh.getBoundingInfo()
                 .boundingBox;
             const behind = plane !== wall &&
-                isBehindWall({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z);
+                goesWithPortal({ minZ: minimumWorld.z, maxZ: maximumWorld.z }, wallMax.z, this.inPlayerRoom(plane));
             if (behind && this.isWall(plane)) {
                 this.gapWalls.push({
                     minX: minimumWorld.x,

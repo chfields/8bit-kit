@@ -8,6 +8,10 @@ export declare function isBehindWall(surface: {
     minZ: number;
     maxZ: number;
 }, wallZ: number): boolean;
+export declare function goesWithPortal(surface: {
+    minZ: number;
+    maxZ: number;
+}, wallZ: number, inPlayerRoom: boolean): boolean;
 export declare function gapPanels(wall: Extent, behind: Extent[]): Extent[];
 export declare const DEFAULT_WALL_OVERLAP = 0.08;
 export declare function wallOverlap(search: string): number;
