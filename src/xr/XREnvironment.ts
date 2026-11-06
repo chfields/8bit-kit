@@ -233,6 +233,9 @@ export class XREnvironment {
   private atHead(plane: any): boolean {
     const camera = this.scene.activeCamera;
     if (!camera || !plane.transformationMatrix) return false;
+    // The headset moves the camera before a frame draws, so its drawn place can be a frame old,
+    // or from before the session on the first one.
+    camera.computeWorldMatrix();
     const pose = this.wallAlignment
       ? plane.transformationMatrix.multiply(this.wallAlignment.getWorldMatrix())
       : plane.transformationMatrix;

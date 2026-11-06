@@ -59,8 +59,6 @@ describe("surfaces the headset reports at the player's head", () => {
     scene = new Scene(engine);
     camera = new FreeCamera("camera", HEAD.clone(), scene);
     camera.setTarget(new Vector3(0, 1.68, 1));
-    // The headset reports surfaces after a frame has drawn, which sets the camera's world place.
-    camera.computeWorldMatrix(true);
     env = new XREnvironment(scene);
     detector = {
       onPlaneAddedObservable: new Observable(),
@@ -94,6 +92,17 @@ describe("surfaces the headset reports at the player's head", () => {
     expect(env.getFacedWall()?.id).toBe(real.id);
   });
 
+  test("a wall at the head is left out on the first frame, before the camera has drawn", () => {
+    // Entering the headset moves the camera to the player's eyes before a frame draws, so its
+    // last drawn place is still where it was outside the headset.
+    camera.position.set(0, 1, -2);
+    camera.computeWorldMatrix(true);
+    camera.position.copyFrom(HEAD);
+    const atHead = plane("wall", poseAt(HEAD.clone()));
+    detector.onPlaneAddedObservable.notifyObservers(atHead);
+    expect(walls()).toEqual([]);
+  });
+
   test("a surface just in front of the head is still a surface", () => {
     const close = plane("wall", poseAt(HEAD.add(new Vector3(0, 0, 0.3))));
     detector.onPlaneAddedObservable.notifyObservers(close);
@@ -105,7 +114,6 @@ describe("surfaces the headset reports at the player's head", () => {
     detector.onPlaneAddedObservable.notifyObservers(wall);
     // The head moves, and the headset moves the wall with it.
     camera.position.set(0.2, 1.7, 0.1);
-    camera.computeWorldMatrix(true);
     wall.transformationMatrix = poseAt(camera.position.clone());
     detector.onPlaneUpdatedObservable.notifyObservers(wall);
     expect(walls()).toEqual([]);
