@@ -184,6 +184,10 @@ separate for each site.
 - `python3 scripts/generate-smoke.py` redraws the portal's smoke. Needs Pillow and NumPy.
 - `npm link` here, then `npm link 8bit-kit` in a game, to use a local copy.
 - `scripts/release.sh 0.2.0` builds, commits `dist` and tags. It doesn't push.
+- `scripts/upgrade-games.sh 0.2.0` moves every game beside the kit to that tag, runs each one's
+  build, unit and browser tests, and commits the ones that pass. It stops each game's own dev
+  servers first. `--list` shows the games it finds, `--only` picks some, `--why` finishes the
+  commit message, and `--push` pushes and checks the deploy, because pushing a game deploys it.
 
 While below 1.0, a breaking change raises the middle number and anything else raises the
 last. Tags never move, so fix a bad release with a new tag.
